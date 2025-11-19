@@ -469,18 +469,22 @@ def encode_text_and_images(
         result["positive_encoding_tensor"] = positive_tensor
         result["negative_encoding_tensor"] = negative_tensor
         
-        # Cleanup: Move models to CPU and free memory
+        # Cleanup: Unload models and free memory
         try:
             import comfy.model_management as model_management
+            # Explicitly unload all models to free GPU memory
+            model_management.unload_all_models()
             # Cleanup unused models
             model_management.cleanup_models_gc()
             # Clear CUDA cache if available
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+                torch.cuda.synchronize()  # Ensure all operations are complete
         except (ImportError, AttributeError):
             # Fallback: just clear CUDA cache
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+                torch.cuda.synchronize()
         
         return result
         
@@ -489,6 +493,19 @@ def encode_text_and_images(
         
         error_code = type(e).__name__
         error_message = str(e)
+        
+        # Cleanup on error too
+        try:
+            import comfy.model_management as model_management
+            model_management.unload_all_models()
+            model_management.cleanup_models_gc()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+        except (ImportError, AttributeError):
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
         
         return {
             "status": "error",
