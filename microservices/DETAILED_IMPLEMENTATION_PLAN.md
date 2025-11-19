@@ -637,11 +637,17 @@ done
 
 **Goal**: Run Triton server on VastAI instance
 
+**⚠️ IMPORTANT: For containerized VastAI** (like `vastai/base-image_cuda-13.0.1-cudnn-devel-ubuntu24.04-py313/jupyter`), **use direct installation**:
+
 **Tasks on VastAI**:
-- [ ] Pull Triton container: `docker pull nvcr.io/nvidia/tritonserver:25.10-py3`
-- [ ] Start Triton using `start_triton.sh` script
+- [ ] Run `setup_triton_direct.sh` to install Triton directly (no Docker)
+- [ ] Start Triton using `start_triton_direct.sh` script
 - [ ] Verify server starts: Check logs
 - [ ] Verify models load: Check model status API: `curl http://localhost:8000/v2/models`
+
+**Alternative (if Docker socket accessible)**:
+- [ ] Pull Triton container: `docker pull nvcr.io/nvidia/tritonserver:25.10-py3`
+- [ ] Start Triton with Docker socket mount
 
 **Deliverable**: Running Triton server on VastAI
 
