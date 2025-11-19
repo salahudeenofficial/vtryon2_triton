@@ -16,19 +16,6 @@ import threading
 
 sys.path.insert(0, str(Path(__file__).parent / "text_encoder"))
 
-# Clean up GPU memory BEFORE importing service (which might initialize ComfyUI)
-def cleanup_before_import():
-    """Clean up GPU memory before importing service module"""
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
-        import gc
-        gc.collect()
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
-
-cleanup_before_import()
-
 from service import encode_text_and_images
 from config import Config
 
@@ -269,19 +256,33 @@ def test_basic_functionality():
                 comparison_pos = compare_tensors(pos_tensor, expected_positive)
                 results['comparison_positive'] = comparison_pos
                 
-                if comparison_pos['within_tolerance']:
-                    print(f"✓ Positive encoding matches expected (max diff: {comparison_pos['max_diff']:.2e})")
+                if comparison_pos['shapes_match'] and comparison_pos['dtypes_match']:
+                    if comparison_pos['within_tolerance']:
+                        print(f"✓ Positive encoding matches expected (max diff: {comparison_pos['max_diff']:.2e})")
+                    else:
+                        print(f"⚠️  Positive encoding differs (max diff: {comparison_pos['max_diff']:.2e})")
                 else:
-                    print(f"⚠️  Positive encoding differs (max diff: {comparison_pos['max_diff']:.2e})")
+                    print(f"⚠️  Positive encoding cannot be compared:")
+                    if not comparison_pos['shapes_match']:
+                        print(f"   Shape mismatch: actual {pos_tensor.shape} vs expected {expected_positive.shape}")
+                    if not comparison_pos['dtypes_match']:
+                        print(f"   Dtype mismatch: actual {pos_tensor.dtype} vs expected {expected_positive.dtype}")
             
             if expected_negative is not None and neg_tensor is not None:
                 comparison_neg = compare_tensors(neg_tensor, expected_negative)
                 results['comparison_negative'] = comparison_neg
                 
-                if comparison_neg['within_tolerance']:
-                    print(f"✓ Negative encoding matches expected (max diff: {comparison_neg['max_diff']:.2e})")
+                if comparison_neg['shapes_match'] and comparison_neg['dtypes_match']:
+                    if comparison_neg['within_tolerance']:
+                        print(f"✓ Negative encoding matches expected (max diff: {comparison_neg['max_diff']:.2e})")
+                    else:
+                        print(f"⚠️  Negative encoding differs (max diff: {comparison_neg['max_diff']:.2e})")
                 else:
-                    print(f"⚠️  Negative encoding differs (max diff: {comparison_neg['max_diff']:.2e})")
+                    print(f"⚠️  Negative encoding cannot be compared:")
+                    if not comparison_neg['shapes_match']:
+                        print(f"   Shape mismatch: actual {neg_tensor.shape} vs expected {expected_negative.shape}")
+                    if not comparison_neg['dtypes_match']:
+                        print(f"   Dtype mismatch: actual {neg_tensor.dtype} vs expected {expected_negative.dtype}")
             
             results['metadata'] = result.get('metadata', {})
             results['status'] = 'success'
@@ -487,61 +488,6 @@ def test_resource_usage():
     
     return results
 
-def cleanup_gpu_memory():
-    """Clean up GPU memory by unloading all models"""
-    print("\n🧹 Cleaning up GPU memory...")
-    
-    # First, try to use model_management if ComfyUI is already initialized
-    try:
-        import comfy.model_management as model_management
-        model_management.unload_all_models()
-        model_management.cleanup_models_gc()
-        print("   ✓ Unloaded all ComfyUI models")
-    except (ImportError, AttributeError):
-        # ComfyUI not initialized yet, try to initialize it
-        try:
-            from pathlib import Path
-            import sys
-            
-            # Try to find and add ComfyUI
-            potential_paths = [
-                Path(__file__).parent / "triton_model_repository" / "shared_comfyui",
-                Path(__file__).parent.parent / "triton_model_repository" / "shared_comfyui",
-            ]
-            for comfyui_path in potential_paths:
-                if comfyui_path.exists() and (comfyui_path / "comfy").exists():
-                    if str(comfyui_path) not in sys.path:
-                        sys.path.insert(0, str(comfyui_path))
-                    try:
-                        import comfy.model_management as model_management
-                        model_management.unload_all_models()
-                        model_management.cleanup_models_gc()
-                        print("   ✓ Unloaded all ComfyUI models (after path setup)")
-                        break
-                    except:
-                        continue
-        except Exception as e:
-            print(f"   ⚠️  Could not unload ComfyUI models: {e}")
-    
-    # Always clear CUDA cache and force garbage collection
-    if torch.cuda.is_available():
-        import gc
-        gc.collect()
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
-        gc.collect()
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
-        
-        memory_after = get_gpu_memory()
-        allocated = torch.cuda.memory_allocated() / (1024 * 1024)
-        reserved = torch.cuda.memory_reserved() / (1024 * 1024)
-        
-        print(f"   GPU memory after cleanup: {memory_after:.1f} MB")
-        if allocated > 100 or reserved > 100:
-            print(f"   ⚠️  Warning: PyTorch shows {allocated:.1f} MB allocated, {reserved:.1f} MB reserved")
-            print(f"   💡 If GPU is still full, there may be a zombie process. Check with: nvidia-smi")
-
 def main():
     """Run all tests and generate TRITON_CONFIG_DATA.json"""
     print("=" * 60)
@@ -549,15 +495,8 @@ def main():
     print("=" * 60)
     print()
     
-    # Clean up GPU memory before running tests
-    cleanup_gpu_memory()
-    
     test_results = {}
     test_results['basic_functionality'] = test_basic_functionality()
-    
-    # Clean up between tests
-    cleanup_gpu_memory()
-    
     test_results['resource_profiling'] = test_resource_usage()
     
     # Compile config data
