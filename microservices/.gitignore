@@ -25,8 +25,8 @@ triton_model_repository/shared_models/
 *.onnx
 *.plan
 
-# ComfyUI (will be copied, not tracked)
-triton_model_repository/shared_comfyui/
+# ComfyUI - now tracked in git
+# triton_model_repository/shared_comfyui/
 
 # IDE
 .vscode/
