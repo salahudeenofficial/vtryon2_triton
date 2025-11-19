@@ -31,6 +31,107 @@ def get_gpu_memory():
     except:
         return 0
 
+def get_gpu_utilization():
+    """Get GPU utilization percentage"""
+    try:
+        result = subprocess.run(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,nounits,noheader'],
+                              capture_output=True, text=True, timeout=5)
+        return float(result.stdout.strip())
+    except:
+        return 0.0
+
+def get_gpu_memory_utilization():
+    """Get GPU memory utilization percentage"""
+    try:
+        result = subprocess.run(['nvidia-smi', '--query-gpu=utilization.memory', '--format=csv,nounits,noheader'],
+                              capture_output=True, text=True, timeout=5)
+        return float(result.stdout.strip())
+    except:
+        return 0.0
+
+def get_cpu_info():
+    """Get detailed CPU information"""
+    try:
+        cpu_count = psutil.cpu_count(logical=True)
+        cpu_freq = psutil.cpu_freq()
+        return {
+            "logical_cores": cpu_count,
+            "physical_cores": psutil.cpu_count(logical=False),
+            "max_frequency_mhz": cpu_freq.max if cpu_freq else None,
+            "current_frequency_mhz": cpu_freq.current if cpu_freq else None
+        }
+    except:
+        return {"logical_cores": 1, "physical_cores": 1}
+
+def get_per_core_cpu_usage():
+    """Get CPU usage per core"""
+    try:
+        return psutil.cpu_percent(interval=0.1, percpu=True)
+    except:
+        return []
+
+def calculate_concurrency_recommendations(
+    gpu_memory_used: float,
+    gpu_memory_total: float,
+    gpu_util_avg: float,
+    cpu_cores_utilized: int,
+    cpu_cores_total: int,
+    inference_time: float
+) -> dict:
+    """Calculate recommended concurrency based on resource usage"""
+    
+    recommendations = {
+        "recommended_instances": 1,
+        "bottleneck": "unknown",
+        "reasoning": []
+    }
+    
+    # GPU Memory-based concurrency
+    if gpu_memory_total and gpu_memory_used:
+        memory_based_instances = int(gpu_memory_total / gpu_memory_used * 0.8)
+        recommendations['memory_based_instances'] = max(1, memory_based_instances)
+        recommendations['reasoning'].append(f"GPU memory allows ~{memory_based_instances} instances (80% safety)")
+    else:
+        memory_based_instances = 1
+    
+    # GPU Compute-based concurrency
+    if gpu_util_avg < 50:
+        compute_based_instances = int(100 / max(gpu_util_avg, 1))
+        recommendations['compute_based_instances'] = max(1, min(compute_based_instances, 4))
+        recommendations['reasoning'].append(f"GPU compute underutilized ({gpu_util_avg:.1f}%), can handle more instances")
+    elif gpu_util_avg < 80:
+        compute_based_instances = 2
+        recommendations['compute_based_instances'] = 2
+        recommendations['reasoning'].append(f"GPU compute moderately utilized ({gpu_util_avg:.1f}%), 2 instances recommended")
+    else:
+        compute_based_instances = 1
+        recommendations['compute_based_instances'] = 1
+        recommendations['reasoning'].append(f"GPU compute highly utilized ({gpu_util_avg:.1f}%), single instance recommended")
+    
+    # CPU-based concurrency
+    if cpu_cores_utilized < cpu_cores_total * 0.5:
+        cpu_based_instances = int(cpu_cores_total / max(cpu_cores_utilized, 1))
+        recommendations['cpu_based_instances'] = max(1, min(cpu_based_instances, 8))
+        recommendations['reasoning'].append(f"CPU underutilized ({cpu_cores_utilized}/{cpu_cores_total} cores), can handle more")
+    else:
+        cpu_based_instances = 1
+        recommendations['cpu_based_instances'] = 1
+        recommendations['reasoning'].append(f"CPU well utilized ({cpu_cores_utilized}/{cpu_cores_total} cores)")
+    
+    # Determine bottleneck and recommended instances
+    recommended_instances = min(memory_based_instances, compute_based_instances, cpu_based_instances)
+    
+    if recommended_instances == memory_based_instances:
+        recommendations['bottleneck'] = "gpu_memory"
+    elif recommended_instances == compute_based_instances:
+        recommendations['bottleneck'] = "gpu_compute"
+    else:
+        recommendations['bottleneck'] = "cpu"
+    
+    recommendations['recommended_instances'] = recommended_instances
+    
+    return recommendations
+
 def compare_tensors(actual: torch.Tensor, expected: torch.Tensor, tolerance: float = 1e-5) -> dict:
     """Compare actual tensor with expected tensor."""
     comparison = {
@@ -132,7 +233,7 @@ def test_basic_functionality():
     return results
 
 def test_resource_usage():
-    """Test 2: Resource profiling"""
+    """Test 2: Resource profiling with comprehensive metrics for concurrency analysis"""
     print("\n" + "=" * 60)
     print("Test 2: Resource Profiling")
     print("=" * 60)
@@ -141,30 +242,46 @@ def test_resource_usage():
         "test_name": "resource_profiling"
     }
     
-    # Get initial GPU memory
+    # Get system information
+    cpu_info = get_cpu_info()
+    results['system_info'] = cpu_info
+    
+    # Get initial GPU metrics
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats()
         initial_gpu_memory = get_gpu_memory()
+        initial_gpu_util = get_gpu_utilization()
+        initial_gpu_mem_util = get_gpu_memory_utilization()
     else:
         initial_gpu_memory = get_gpu_memory()
+        initial_gpu_util = 0.0
+        initial_gpu_mem_util = 0.0
     
-    # Get initial CPU usage
+    # Get initial CPU metrics
     process = psutil.Process()
     initial_cpu = process.cpu_percent(interval=0.1)
+    initial_system_cpu = psutil.cpu_percent(interval=0.1)
     
     # Run inference
     test_latent = "test_outputs/sampling_output.pt"
     
     if os.path.exists(test_latent):
-        # Monitor CPU during inference
+        # Monitor resources during inference
         cpu_samples = []
-        def monitor_cpu():
+        per_core_samples = []
+        gpu_util_samples = []
+        gpu_mem_util_samples = []
+        
+        def monitor_resources():
             while True:
                 cpu_samples.append(process.cpu_percent(interval=0.1))
+                per_core_samples.append(get_per_core_cpu_usage())
+                gpu_util_samples.append(get_gpu_utilization())
+                gpu_mem_util_samples.append(get_gpu_memory_utilization())
                 time.sleep(0.1)
         
-        monitor_thread = threading.Thread(target=monitor_cpu, daemon=True)
+        monitor_thread = threading.Thread(target=monitor_resources, daemon=True)
         monitor_thread.start()
         
         start_time = time.time()
@@ -176,15 +293,17 @@ def test_resource_usage():
         
         time.sleep(0.2)
         
-        # Get peak GPU memory
+        # Get peak GPU metrics
         if torch.cuda.is_available():
             peak_gpu_memory_mb = torch.cuda.max_memory_allocated() / (1024 * 1024)
             current_gpu_memory = get_gpu_memory()
+            total_gpu_memory = torch.cuda.get_device_properties(0).total_memory / (1024 * 1024)
         else:
             peak_gpu_memory_mb = get_gpu_memory()
             current_gpu_memory = peak_gpu_memory_mb
+            total_gpu_memory = None
         
-        # Calculate average CPU usage
+        # Calculate statistics
         if cpu_samples:
             avg_cpu = sum(cpu_samples) / len(cpu_samples)
             max_cpu = max(cpu_samples)
@@ -192,27 +311,97 @@ def test_resource_usage():
             avg_cpu = process.cpu_percent(interval=0.1)
             max_cpu = avg_cpu
         
+        # Per-core CPU analysis
+        if per_core_samples:
+            max_per_core = [max([sample[i] if i < len(sample) else 0 for sample in per_core_samples]) 
+                          for i in range(cpu_info['logical_cores'])]
+            avg_per_core = [sum([sample[i] if i < len(sample) else 0 for sample in per_core_samples]) / len(per_core_samples)
+                          for i in range(cpu_info['logical_cores'])]
+        else:
+            max_per_core = []
+            avg_per_core = []
+        
+        # GPU utilization statistics
+        if gpu_util_samples:
+            avg_gpu_util = sum(gpu_util_samples) / len(gpu_util_samples)
+            max_gpu_util = max(gpu_util_samples)
+        else:
+            avg_gpu_util = get_gpu_utilization()
+            max_gpu_util = avg_gpu_util
+        
+        if gpu_mem_util_samples:
+            avg_gpu_mem_util = sum(gpu_mem_util_samples) / len(gpu_mem_util_samples)
+            max_gpu_mem_util = max(gpu_mem_util_samples)
+        else:
+            avg_gpu_mem_util = get_gpu_memory_utilization()
+            max_gpu_mem_util = avg_gpu_mem_util
+        
+        final_system_cpu = psutil.cpu_percent(interval=0.1)
+        
+        # Compile results
         results['gpu_memory'] = {
             "initial_mb": initial_gpu_memory,
             "peak_mb": peak_gpu_memory_mb,
             "current_mb": current_gpu_memory,
-            "used_mb": peak_gpu_memory_mb - initial_gpu_memory
+            "used_mb": peak_gpu_memory_mb - initial_gpu_memory,
+            "total_mb": total_gpu_memory,
+            "utilization_percent": {
+                "initial": initial_gpu_mem_util,
+                "average": avg_gpu_mem_util,
+                "peak": max_gpu_mem_util
+            }
+        }
+        
+        results['gpu_compute'] = {
+            "utilization_percent": {
+                "initial": initial_gpu_util,
+                "average": avg_gpu_util,
+                "peak": max_gpu_util
+            }
         }
         
         results['cpu_usage'] = {
-            "initial_percent": initial_cpu,
-            "average_percent": avg_cpu,
-            "peak_percent": max_cpu
+            "process_percent": {
+                "initial": initial_cpu,
+                "average": avg_cpu,
+                "peak": max_cpu
+            },
+            "system_percent": {
+                "initial": initial_system_cpu,
+                "final": final_system_cpu
+            },
+            "per_core": {
+                "max": max_per_core,
+                "average": avg_per_core,
+                "cores_utilized": len([x for x in max_per_core if x > 10])
+            }
         }
         
         results['inference_time_seconds'] = inference_time
         
+        # Calculate concurrency recommendations
+        results['concurrency_analysis'] = calculate_concurrency_recommendations(
+            gpu_memory_used=results['gpu_memory']['used_mb'],
+            gpu_memory_total=total_gpu_memory,
+            gpu_util_avg=avg_gpu_util,
+            cpu_cores_utilized=results['cpu_usage']['per_core']['cores_utilized'],
+            cpu_cores_total=cpu_info['logical_cores'],
+            inference_time=inference_time
+        )
+        
         print(f"✓ GPU Memory - Initial: {initial_gpu_memory:.1f} MB")
         print(f"✓ GPU Memory - Peak: {peak_gpu_memory_mb:.1f} MB")
         print(f"✓ GPU Memory - Used: {results['gpu_memory']['used_mb']:.1f} MB")
-        print(f"✓ CPU Usage - Average: {avg_cpu:.1f}%")
-        print(f"✓ CPU Usage - Peak: {max_cpu:.1f}%")
+        if total_gpu_memory:
+            print(f"✓ GPU Memory - Total: {total_gpu_memory:.1f} MB ({results['gpu_memory']['utilization_percent']['peak']:.1f}% peak utilization)")
+        print(f"✓ GPU Compute - Average: {avg_gpu_util:.1f}%, Peak: {max_gpu_util:.1f}%")
+        print(f"✓ CPU Usage - Process Average: {avg_cpu:.1f}%, Peak: {max_cpu:.1f}%")
+        print(f"✓ CPU Usage - System: {initial_system_cpu:.1f}% → {final_system_cpu:.1f}%")
+        print(f"✓ CPU Cores - Utilized: {results['cpu_usage']['per_core']['cores_utilized']}/{cpu_info['logical_cores']}")
         print(f"✓ Inference Time: {inference_time:.3f}s")
+        print(f"\n📊 Concurrency Analysis:")
+        print(f"   Recommended instances: {results['concurrency_analysis']['recommended_instances']}")
+        print(f"   Bottleneck: {results['concurrency_analysis']['bottleneck']}")
     else:
         results['note'] = "Test input tensor not found"
         results['gpu_memory'] = {"used_mb": "TBD"}
@@ -250,10 +439,11 @@ def main():
             "vae_decoder": "shared_models/vae/qwen_image_vae.safetensors"
         },
         "triton_config": {
-            "recommended_instance_count": 1,
+            "recommended_instance_count": test_results['resource_profiling'].get('concurrency_analysis', {}).get('recommended_instances', 1),
             "recommended_max_batch_size": 1,
             "dynamic_batching": False,
-            "model_sharing": "shared"
+            "model_sharing": "shared",
+            "concurrency_analysis": test_results['resource_profiling'].get('concurrency_analysis', {})
         }
     }
     
