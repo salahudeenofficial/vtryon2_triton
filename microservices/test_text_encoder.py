@@ -16,6 +16,19 @@ import threading
 
 sys.path.insert(0, str(Path(__file__).parent / "text_encoder"))
 
+# Clean up GPU memory BEFORE importing service (which might initialize ComfyUI)
+def cleanup_before_import():
+    """Clean up GPU memory before importing service module"""
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        import gc
+        gc.collect()
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+
+cleanup_before_import()
+
 from service import encode_text_and_images
 from config import Config
 
@@ -476,19 +489,61 @@ def test_resource_usage():
 
 def cleanup_gpu_memory():
     """Clean up GPU memory by unloading all models"""
-    print("\n🧹 Cleaning up GPU memory before tests...")
+    print("\n🧹 Cleaning up GPU memory...")
+    
+    # First, try to initialize ComfyUI if not already done, so we can use model_management
     try:
+        # Try to import and setup ComfyUI paths first
+        from pathlib import Path
+        import sys
+        
+        # Check if ComfyUI is already in sys.path
+        comfyui_found = False
+        for path in sys.path:
+            if 'comfyui' in path.lower() or 'comfy' in path.lower():
+                comfyui_found = True
+                break
+        
+        if not comfyui_found:
+            # Try to find and add ComfyUI
+            potential_paths = [
+                Path(__file__).parent / "triton_model_repository" / "shared_comfyui",
+                Path(__file__).parent.parent / "triton_model_repository" / "shared_comfyui",
+            ]
+            for comfyui_path in potential_paths:
+                if comfyui_path.exists() and (comfyui_path / "comfy").exists():
+                    sys.path.insert(0, str(comfyui_path))
+                    break
+        
+        # Now try to use model_management
         import comfy.model_management as model_management
         model_management.unload_all_models()
         model_management.cleanup_models_gc()
-    except (ImportError, AttributeError):
-        pass
+        print("   ✓ Unloaded all ComfyUI models")
+    except (ImportError, AttributeError, Exception) as e:
+        print(f"   ⚠️  Could not unload ComfyUI models: {e}")
     
+    # Always clear CUDA cache
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
+        # Force garbage collection
+        import gc
+        gc.collect()
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        
         memory_after = get_gpu_memory()
         print(f"   GPU memory after cleanup: {memory_after:.1f} MB")
+        
+        # Check if there's still memory allocated (might be from another process)
+        try:
+            allocated = torch.cuda.memory_allocated() / (1024 * 1024)
+            reserved = torch.cuda.memory_reserved() / (1024 * 1024)
+            if allocated > 100 or reserved > 100:
+                print(f"   ⚠️  Warning: Still {allocated:.1f} MB allocated, {reserved:.1f} MB reserved")
+        except:
+            pass
 
 def main():
     """Run all tests and generate TRITON_CONFIG_DATA.json"""
