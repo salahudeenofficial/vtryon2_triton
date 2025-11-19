@@ -2200,7 +2200,7 @@ async def load_custom_node(module_path: str, ignore=set(), module_parent="custom
                 logging.warning(f"Error while calling comfy_entrypoint in {module_path}: {e}")
                 return False
         else:
-            logging.warning(f"Skip {module_path} module for custom nodes due to the lack of NODE_CLASS_MAPPINGS or NODES_LIST (need one).")
+            # Suppress warning for microservices - not all modules need to be nodes
             return False
     except Exception as e:
         # Suppress warnings for microservices - node import failures are expected
