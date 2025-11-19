@@ -1,108 +1,133 @@
+"""
+Triton Python Backend Model for Sampling
+
+This model performs diffusion sampling using text encodings and latent image.
+Inputs: positive_encoding (FP32), negative_encoding (FP32), latent_image (FP32), seed (INT64)
+Output: sampled_latent (FP32 tensor)
+"""
+
 import triton_python_backend_utils as pb_utils
 import sys
 import os
-import logging
-from pathlib import Path
-import torch
 import numpy as np
+import torch
+from pathlib import Path
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Setup paths for ComfyUI and service code
+model_dir = Path(pb_utils.get_model_dir())
+comfyui_path = model_dir.parent.parent / "shared_comfyui"
+sys.path.insert(0, str(comfyui_path))
+sys.path.insert(0, str(model_dir))
+
+# Import service functions
+from service import sample_latent
+from config import Config
 
 
 class TritonPythonModel:
     def initialize(self, args):
-        logger.info("Initializing sampling model...")
+        """Initialize the model - setup ComfyUI paths."""
+        self.logger = pb_utils.Logger
+        self.logger.log_info("Initializing sampling model...")
         
-        # Get model directory
-        self.model_dir = pb_utils.get_model_dir()
-        repo_root = Path(self.model_dir).parent.parent
-        self.comfyui_path = repo_root / "shared_comfyui"
-        self.models_path = repo_root / "shared_models"
+        # Store model directory for path resolution
+        self.model_dir = model_dir
         
-        # Set environment variables
-        os.environ["COMFYUI_PATH"] = str(self.comfyui_path)
-        os.environ["MODEL_DIR"] = str(self.models_path)
-        
-        # Add paths
-        sys.path.insert(0, str(self.comfyui_path))
-        sys.path.insert(0, str(self.model_dir))
-        
-        # Import service
-        from service import sample_latent, setup_comfyui
-        from config import Config
-        
-        # Setup ComfyUI (this loads models)
-        setup_comfyui()
-        
-        self.sample_latent = sample_latent
-        self.config = Config
-        logger.info("Sampling model initialized")
+        # ComfyUI will be initialized when service is called
+        self.logger.log_info("✓ Sampling model initialized")
     
     def execute(self, requests):
+        """Execute inference requests."""
         responses = []
         
         for request in requests:
             try:
-                # Get inputs
-                positive_encoding_tensor = pb_utils.get_input_tensor_by_name(request, "positive_encoding")
-                negative_encoding_tensor = pb_utils.get_input_tensor_by_name(request, "negative_encoding")
-                latent_image_tensor = pb_utils.get_input_tensor_by_name(request, "latent_image")
+                # Get input tensors
+                positive_tensor = pb_utils.get_input_tensor_by_name(request, "positive_encoding")
+                negative_tensor = pb_utils.get_input_tensor_by_name(request, "negative_encoding")
+                latent_tensor = pb_utils.get_input_tensor_by_name(request, "latent_image")
                 seed_tensor = pb_utils.get_input_tensor_by_name(request, "seed")
-                steps_tensor = pb_utils.get_input_tensor_by_name(request, "steps")
-                cfg_tensor = pb_utils.get_input_tensor_by_name(request, "cfg")
                 
-                if positive_encoding_tensor is None or negative_encoding_tensor is None or latent_image_tensor is None:
-                    raise ValueError("Missing required input tensors")
+                if positive_tensor is None or negative_tensor is None or latent_tensor is None:
+                    error_response = pb_utils.InferenceResponse(
+                        output_tensors=[],
+                        error=pb_utils.TritonError("Missing required inputs")
+                    )
+                    responses.append(error_response)
+                    continue
                 
-                # Convert STRING inputs to file paths
-                positive_encoding_path = positive_encoding_tensor.as_numpy()[0].decode('utf-8')
-                negative_encoding_path = negative_encoding_tensor.as_numpy()[0].decode('utf-8')
-                latent_image_path = latent_image_tensor.as_numpy()[0].decode('utf-8')
+                # Extract tensors from Triton format
+                positive_np = positive_tensor.as_numpy().astype(np.float32)
+                negative_np = negative_tensor.as_numpy().astype(np.float32)
+                latent_np = latent_tensor.as_numpy().astype(np.float32)
                 
-                # Convert numeric inputs (FP32 -> int/float)
-                seed = int(seed_tensor.as_numpy()[0]) if seed_tensor is not None else None
-                steps = int(steps_tensor.as_numpy()[0]) if steps_tensor is not None else 4
-                cfg = float(cfg_tensor.as_numpy()[0]) if cfg_tensor is not None else 1.0
+                # Convert to PyTorch tensors
+                positive_pt = torch.from_numpy(positive_np)
+                negative_pt = torch.from_numpy(negative_np)
+                latent_pt = torch.from_numpy(latent_np)
                 
-                logger.info(f"Processing: seed={seed}, steps={steps}, cfg={cfg}")
+                # Add batch dimension if not present
+                if len(positive_pt.shape) == 2:
+                    positive_pt = positive_pt.unsqueeze(0)
+                if len(negative_pt.shape) == 2:
+                    negative_pt = negative_pt.unsqueeze(0)
+                if len(latent_pt.shape) == 4:
+                    latent_pt = latent_pt.unsqueeze(0) if latent_pt.shape[0] != 1 else latent_pt
+                
+                # Extract seed
+                seed = None
+                if seed_tensor is not None:
+                    seed = int(seed_tensor.as_numpy().item())
                 
                 # Call service function
-                result = self.sample_latent(
-                    positive_encoding=positive_encoding_path,
-                    negative_encoding=negative_encoding_path,
-                    latent_image=latent_image_path,
+                result = sample_latent(
+                    positive_encoding=positive_pt,
+                    negative_encoding=negative_pt,
+                    latent_image=latent_pt,
                     seed=seed,
-                    steps=steps,
-                    cfg=cfg,
-                    save_tensor=False
+                    steps=4,
+                    cfg=1.0,
+                    save_tensor=False  # Don't save, just return tensor
                 )
                 
-                if result["status"] != "success":
-                    raise RuntimeError(f"Service error: {result.get('error_message', 'Unknown error')}")
+                if result['status'] == 'error':
+                    error_response = pb_utils.InferenceResponse(
+                        output_tensors=[],
+                        error=pb_utils.TritonError(f"Service error: {result.get('error_message', 'Unknown error')}")
+                    )
+                    responses.append(error_response)
+                    continue
                 
                 # Get sampled latent tensor from result
-                sampled_latent_tensor = result["sampled_latent_tensor"]
+                sampled_tensor = result['sampled_latent_tensor']
                 
-                # Convert to numpy
-                sampled_latent_np = sampled_latent_tensor.cpu().numpy().astype(np.float32)
+                # Convert to numpy and ensure correct dtype
+                sampled_np = sampled_tensor.detach().cpu().numpy().astype(np.float32)
+                
+                # Remove batch dimension if present
+                if len(sampled_np.shape) > 4 and sampled_np.shape[0] == 1:
+                    sampled_np = sampled_np[0]
                 
                 # Create output tensor
-                output_tensor = pb_utils.Tensor("sampled_latent", sampled_latent_np)
-                response = pb_utils.InferenceResponse([output_tensor])
-                responses.append(response)
+                output_tensor = pb_utils.Tensor("sampled_latent", sampled_np)
+                
+                # Create response
+                inference_response = pb_utils.InferenceResponse([output_tensor])
+                responses.append(inference_response)
                 
             except Exception as e:
-                logger.error(f"Error: {e}", exc_info=True)
+                self.logger.log_error(f"Error processing request: {e}")
+                import traceback
+                self.logger.log_error(traceback.format_exc())
                 error_response = pb_utils.InferenceResponse(
                     output_tensors=[],
-                    error=pb_utils.TritonError(f"Error: {str(e)}")
+                    error=pb_utils.TritonError(f"Execution error: {str(e)}")
                 )
                 responses.append(error_response)
         
         return responses
     
     def finalize(self):
-        logger.info("Finalizing sampling model...")
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        """Cleanup resources."""
+        self.logger.log_info("Finalizing sampling model...")
+        # Cleanup if needed (models are loaded per-request in service)

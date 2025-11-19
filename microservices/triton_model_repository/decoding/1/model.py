@@ -1,101 +1,112 @@
+"""
+Triton Python Backend Model for Decoding
+
+This model decodes latent tensors to images using VAE decoder.
+Input: latent (FP32 tensor)
+Output: image (FP32 tensor)
+"""
+
 import triton_python_backend_utils as pb_utils
 import sys
 import os
-import logging
-from pathlib import Path
-import torch
 import numpy as np
+import torch
+from pathlib import Path
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Setup paths for ComfyUI and service code
+model_dir = Path(pb_utils.get_model_dir())
+comfyui_path = model_dir.parent.parent / "shared_comfyui"
+sys.path.insert(0, str(comfyui_path))
+sys.path.insert(0, str(model_dir))
+
+# Import service functions
+from service import decode_latent_to_image
+from config import Config
 
 
 class TritonPythonModel:
     def initialize(self, args):
-        logger.info("Initializing decoding model...")
+        """Initialize the model - setup ComfyUI paths."""
+        self.logger = pb_utils.Logger
+        self.logger.log_info("Initializing decoding model...")
         
-        # Get model directory
-        self.model_dir = pb_utils.get_model_dir()
-        repo_root = Path(self.model_dir).parent.parent
-        self.comfyui_path = repo_root / "shared_comfyui"
-        self.models_path = repo_root / "shared_models"
+        # Store model directory for path resolution
+        self.model_dir = model_dir
         
-        # Set environment variables
-        os.environ["COMFYUI_PATH"] = str(self.comfyui_path)
-        os.environ["MODEL_DIR"] = str(self.models_path)
-        
-        # Add paths
-        sys.path.insert(0, str(self.comfyui_path))
-        sys.path.insert(0, str(self.model_dir))
-        
-        # Import service
-        from service import decode_latent_to_image, setup_comfyui
-        from config import Config
-        
-        # Setup ComfyUI (this loads models)
-        setup_comfyui()
-        
-        self.decode_latent_to_image = decode_latent_to_image
-        self.config = Config
-        logger.info("Decoding model initialized")
+        # ComfyUI will be initialized when service is called
+        self.logger.log_info("✓ Decoding model initialized")
     
     def execute(self, requests):
+        """Execute inference requests."""
         responses = []
         
         for request in requests:
             try:
-                # Get input (latent path as string)
-                input_tensor = pb_utils.get_input_tensor_by_name(request, "latent")
-                if input_tensor is None:
-                    raise ValueError("latent tensor not found")
+                # Get input tensor (latent)
+                latent_tensor = pb_utils.get_input_tensor_by_name(request, "latent")
                 
-                # Convert to string (Triton STRING type is bytes)
-                latent_path_bytes = input_tensor.as_numpy()[0]
-                latent_path = latent_path_bytes.decode('utf-8')
+                if latent_tensor is None:
+                    error_response = pb_utils.InferenceResponse(
+                        output_tensors=[],
+                        error=pb_utils.TritonError("Missing input: latent")
+                    )
+                    responses.append(error_response)
+                    continue
                 
-                logger.info(f"Processing latent: {latent_path}")
+                # Extract tensor from Triton format
+                latent_np = latent_tensor.as_numpy().astype(np.float32)
                 
-                # Call service function (save_image=False to get tensor directly)
-                result = self.decode_latent_to_image(
-                    latent=latent_path,
-                    save_image=False
+                # Convert to PyTorch tensor
+                latent_pt = torch.from_numpy(latent_np)
+                
+                # Add batch dimension if not present
+                if len(latent_pt.shape) == 4:
+                    latent_pt = latent_pt.unsqueeze(0) if latent_pt.shape[0] != 1 else latent_pt
+                
+                # Call service function
+                result = decode_latent_to_image(
+                    latent=latent_pt,
+                    save_image=False  # Don't save, just return tensor
                 )
                 
-                if result["status"] != "success":
-                    raise RuntimeError(f"Service error: {result.get('error_message', 'Unknown error')}")
+                if result['status'] == 'error':
+                    error_response = pb_utils.InferenceResponse(
+                        output_tensors=[],
+                        error=pb_utils.TritonError(f"Service error: {result.get('error_message', 'Unknown error')}")
+                    )
+                    responses.append(error_response)
+                    continue
                 
                 # Get image tensor from result
-                image_tensor = result["image_tensor"]
+                image_tensor = result['image_tensor']
                 
-                # Ensure shape is [batch, height, width, channels]
-                if len(image_tensor.shape) == 3:
-                    # Add batch dimension: [height, width, channels] -> [1, height, width, channels]
-                    image_tensor = image_tensor.unsqueeze(0)
-                elif len(image_tensor.shape) == 4:
-                    # Already has batch dimension
-                    pass
-                else:
-                    raise ValueError(f"Unexpected image tensor shape: {image_tensor.shape}")
+                # Convert to numpy and ensure correct dtype
+                image_np = image_tensor.detach().cpu().numpy().astype(np.float32)
                 
-                # Convert to numpy
-                image_np = image_tensor.cpu().numpy().astype(np.float32)
+                # Remove batch dimension if present
+                if len(image_np.shape) > 3 and image_np.shape[0] == 1:
+                    image_np = image_np[0]
                 
                 # Create output tensor
                 output_tensor = pb_utils.Tensor("image", image_np)
-                response = pb_utils.InferenceResponse([output_tensor])
-                responses.append(response)
+                
+                # Create response
+                inference_response = pb_utils.InferenceResponse([output_tensor])
+                responses.append(inference_response)
                 
             except Exception as e:
-                logger.error(f"Error: {e}", exc_info=True)
+                self.logger.log_error(f"Error processing request: {e}")
+                import traceback
+                self.logger.log_error(traceback.format_exc())
                 error_response = pb_utils.InferenceResponse(
                     output_tensors=[],
-                    error=pb_utils.TritonError(f"Error: {str(e)}")
+                    error=pb_utils.TritonError(f"Execution error: {str(e)}")
                 )
                 responses.append(error_response)
         
         return responses
     
     def finalize(self):
-        logger.info("Finalizing decoding model...")
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        """Cleanup resources."""
+        self.logger.log_info("Finalizing decoding model...")
+        # Cleanup if needed (models are loaded per-request in service)
