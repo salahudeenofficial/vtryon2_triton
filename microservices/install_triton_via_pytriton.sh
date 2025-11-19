@@ -70,46 +70,129 @@ echo "=========================================="
 echo "Step 3: Locating Triton Server Binary"
 echo "=========================================="
 
-# PyTriton installs tritonserver in the Python environment
-TRITON_BIN=$(python3 -c "import site; import os; print(os.path.join(site.getsitepackages()[0] if site.getsitepackages() else site.getusersitepackages(), 'nvidia', 'pytriton', 'bin', 'tritonserver'))" 2>/dev/null || echo "")
+# PyTriton may not include the server binary - it's primarily a Python library
+# We need to find it or download it separately
 
-# Alternative: check common locations
-if [ ! -f "$TRITON_BIN" ] || [ -z "$TRITON_BIN" ]; then
-    # Try to find it in PATH
-    TRITON_BIN=$(which tritonserver 2>/dev/null || echo "")
+TRITON_BIN=""
+
+# Method 1: Check if it's in PATH
+if command -v tritonserver >/dev/null 2>&1; then
+    TRITON_BIN=$(which tritonserver)
+    echo "✓ Found tritonserver in PATH: ${TRITON_BIN}"
 fi
 
-if [ ! -f "$TRITON_BIN" ] || [ -z "$TRITON_BIN" ]; then
-    # Try Python package location
-    TRITON_BIN=$(python3 -c "import nvidia.pytriton; import os; print(os.path.join(os.path.dirname(nvidia.pytriton.__file__), 'bin', 'tritonserver'))" 2>/dev/null || echo "")
-fi
-
-if [ -f "$TRITON_BIN" ]; then
-    echo "✓ Found Triton server: ${TRITON_BIN}"
+# Method 2: Check Python package locations
+if [ -z "$TRITON_BIN" ]; then
+    # Try various Python package locations
+    PYTHON_PATHS=(
+        "$(python3 -c 'import site; print(site.getsitepackages()[0] if site.getsitepackages() else "")' 2>/dev/null)"
+        "$(python3 -c 'import site; print(site.getusersitepackages())' 2>/dev/null)"
+        "$(python3 -c 'import nvidia.pytriton; import os; print(os.path.dirname(nvidia.pytriton.__file__))' 2>/dev/null)"
+    )
     
-    # Create symlink or copy to expected location
+    for PYTHON_PATH in "${PYTHON_PATHS[@]}"; do
+        if [ -n "$PYTHON_PATH" ] && [ -d "$PYTHON_PATH" ]; then
+            # Check common subdirectories
+            POTENTIAL_PATHS=(
+                "${PYTHON_PATH}/nvidia/pytriton/bin/tritonserver"
+                "${PYTHON_PATH}/nvidia/pytriton/tritonserver"
+                "${PYTHON_PATH}/tritonserver/bin/tritonserver"
+            )
+            for POTENTIAL in "${POTENTIAL_PATHS[@]}"; do
+                if [ -f "$POTENTIAL" ] && [ -x "$POTENTIAL" ]; then
+                    TRITON_BIN="$POTENTIAL"
+                    echo "✓ Found tritonserver in Python package: ${TRITON_BIN}"
+                    break 2
+                fi
+            done
+        fi
+    done
+fi
+
+# Method 3: Search in common locations
+if [ -z "$TRITON_BIN" ]; then
+    SEARCH_PATHS=(
+        "${HOME}/.local/bin"
+        "${HOME}/.local/lib"
+        "/usr/local/bin"
+        "/opt/tritonserver/bin"
+    )
+    
+    for SEARCH_PATH in "${SEARCH_PATHS[@]}"; do
+        if [ -f "${SEARCH_PATH}/tritonserver" ] && [ -x "${SEARCH_PATH}/tritonserver" ]; then
+            TRITON_BIN="${SEARCH_PATH}/tritonserver"
+            echo "✓ Found tritonserver: ${TRITON_BIN}"
+            break
+        fi
+    done
+fi
+
+# Method 4: Use find to search
+if [ -z "$TRITON_BIN" ]; then
+    FOUND=$(find "${HOME}/.local" -name "tritonserver" -type f -executable 2>/dev/null | head -1)
+    if [ -n "$FOUND" ]; then
+        TRITON_BIN="$FOUND"
+        echo "✓ Found tritonserver via search: ${TRITON_BIN}"
+    fi
+fi
+
+# If still not found, PyTriton doesn't include the server binary
+# We need to download it separately
+if [ -z "$TRITON_BIN" ] || [ ! -f "$TRITON_BIN" ]; then
+    echo "⚠️  Triton server binary not found"
+    echo ""
+    echo "PyTriton is installed, but it doesn't include the standalone server binary."
+    echo "Downloading the server binary separately..."
+    echo ""
+    
+    # Download the server binary
+    if [ -f "${MICROSERVICES_DIR}/download_triton_server.sh" ]; then
+        chmod +x "${MICROSERVICES_DIR}/download_triton_server.sh"
+        "${MICROSERVICES_DIR}/download_triton_server.sh" || {
+            echo ""
+            echo "❌ Failed to download Triton server binary"
+            echo ""
+            echo "You can download it manually:"
+            echo "  ./download_triton_server.sh"
+            echo ""
+            echo "Or from:"
+            echo "  https://github.com/triton-inference-server/server/releases/download/v2.47.0/tritonserver-2.47.0-ubuntu22.04.tar.gz"
+            exit 1
+        }
+        
+        # Check if it's now available
+        if [ -f "${MICROSERVICES_DIR}/tritonserver/bin/tritonserver" ]; then
+            TRITON_BIN="${MICROSERVICES_DIR}/tritonserver/bin/tritonserver"
+            echo "✓ Triton server binary downloaded and ready"
+        else
+            echo "❌ Binary still not found after download"
+            exit 1
+        fi
+    else
+        echo "❌ download_triton_server.sh not found"
+        echo ""
+        echo "Please download the server binary manually:"
+        echo "  wget https://github.com/triton-inference-server/server/releases/download/v2.47.0/tritonserver-2.47.0-ubuntu22.04.tar.gz"
+        echo "  tar -xzf tritonserver-2.47.0-ubuntu22.04.tar.gz"
+        echo "  mv tritonserver-2.47.0-ubuntu22.04 tritonserver"
+        exit 1
+    fi
+else
+    # Copy or symlink to expected location
     mkdir -p "${MICROSERVICES_DIR}/tritonserver/bin"
     if [ ! -f "${MICROSERVICES_DIR}/tritonserver/bin/tritonserver" ]; then
-        cp "$TRITON_BIN" "${MICROSERVICES_DIR}/tritonserver/bin/tritonserver" 2>/dev/null || \
-        ln -s "$TRITON_BIN" "${MICROSERVICES_DIR}/tritonserver/bin/tritonserver" 2>/dev/null || \
-        echo "⚠️  Could not copy/link, but binary is available at: ${TRITON_BIN}"
+        if [ "$TRITON_BIN" != "${MICROSERVICES_DIR}/tritonserver/bin/tritonserver" ]; then
+            cp "$TRITON_BIN" "${MICROSERVICES_DIR}/tritonserver/bin/tritonserver" 2>/dev/null || \
+            ln -s "$TRITON_BIN" "${MICROSERVICES_DIR}/tritonserver/bin/tritonserver" 2>/dev/null || \
+            echo "⚠️  Could not copy/link, but binary is available at: ${TRITON_BIN}"
+        fi
     fi
     
     # Check version
     if [ -f "${MICROSERVICES_DIR}/tritonserver/bin/tritonserver" ]; then
         echo "✓ Triton binary ready at: ${MICROSERVICES_DIR}/tritonserver/bin/tritonserver"
         "${MICROSERVICES_DIR}/tritonserver/bin/tritonserver" --version 2>/dev/null || echo "  (version check skipped)"
-    else
-        echo "⚠️  Using Triton from: ${TRITON_BIN}"
-        echo "   Update start_triton_direct.sh to use this path"
     fi
-else
-    echo "⚠️  Triton binary not found in expected locations"
-    echo "   Trying to find it..."
-    find ~/.local -name "tritonserver" -type f 2>/dev/null | head -1
-    echo ""
-    echo "   You may need to use: tritonserver (if in PATH)"
-    echo "   Or find the binary location manually"
 fi
 
 echo ""
