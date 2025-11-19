@@ -84,25 +84,45 @@ def setup_comfyui() -> None:
     # Add extra model paths
     add_extra_model_paths(comfyui_path)
     
-    # Configure folder_paths to use microservice's models directory
+    # Configure folder_paths to use models directory
     # This must be done after ComfyUI is added to sys.path
     import folder_paths
     
-    # Get microservice models directory (absolute path)
-    microservice_models_dir = (microservice_dir / Config.model_dir).resolve()
+    # Try multiple model directory locations (for different deployment scenarios)
+    # 1. Shared models in triton_model_repository (VastAI/Phase 2 testing)
+    # 2. Local models directory (development)
     
-    # Add microservice models directory to folder_paths
+    models_dir = None
+    potential_model_dirs = [
+        # Shared models (for VastAI/Phase 2)
+        microservice_dir.parent.parent / "triton_model_repository" / "shared_models",
+        # Local models (development)
+        (microservice_dir / Config.model_dir).resolve(),
+        # Parent models (project root)
+        microservice_dir.parent.parent / "models",
+    ]
+    
+    for potential_dir in potential_model_dirs:
+        if potential_dir.exists():
+            models_dir = potential_dir
+            break
+    
+    # If no models directory found, use config default
+    if models_dir is None:
+        models_dir = (microservice_dir / Config.model_dir).resolve()
+    
+    # Add models directory to folder_paths
     # This adds it as an additional search path (not replacing the default)
-    if microservice_models_dir.exists():
+    if models_dir.exists():
         # Add VAE path
-        vae_path = microservice_models_dir / "vae"
+        vae_path = models_dir / "vae"
         if vae_path.exists():
             folder_paths.add_model_folder_path("vae", str(vae_path), is_default=True)
             print(f"Added VAE model path: {vae_path}")
         
         # Add other model paths if they exist
         for model_type in ["checkpoints", "loras", "clip", "text_encoders", "diffusion_models"]:
-            model_path = microservice_models_dir / model_type
+            model_path = models_dir / model_type
             if model_path.exists():
                 folder_paths.add_model_folder_path(model_type, str(model_path), is_default=False)
     

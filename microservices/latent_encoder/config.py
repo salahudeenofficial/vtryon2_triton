@@ -14,7 +14,13 @@ class Config:
     mode = os.getenv("MODE", "standalone")
     
     # Model Configuration
-    model_dir = os.getenv("MODEL_DIR", "./models")
+    # Try shared models first (for VastAI/Phase 2), then fall back to local
+    _current_dir = Path(__file__).parent.resolve()
+    _shared_models = _current_dir.parent.parent / "triton_model_repository" / "shared_models"
+    if _shared_models.exists():
+        model_dir = os.getenv("MODEL_DIR", str(_shared_models))
+    else:
+        model_dir = os.getenv("MODEL_DIR", "./models")
     vae_model_name = os.getenv("VAE_MODEL_NAME", "qwen_image_vae.safetensors")
     
     # Output Configuration
