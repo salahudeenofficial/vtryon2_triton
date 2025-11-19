@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Test results
+test_results/
+test_data/
+*.log
+
+# Models (too large for git)
+triton_model_repository/shared_models/
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.plan
+
+# ComfyUI (will be copied, not tracked)
+triton_model_repository/shared_comfyui/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak
+*~
+
