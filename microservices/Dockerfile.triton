@@ -1,0 +1,50 @@
+# Dockerfile for Triton Inference Server with VTryon Models
+# This image contains Triton server + all model code + ComfyUI
+# Models are downloaded at runtime (not included in image to keep size small)
+
+FROM nvcr.io/nvidia/tritonserver:25.10-py3
+
+# Set working directory
+WORKDIR /workspace
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    wget \
+    curl \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy model repository structure (code only, no large model files)
+# This includes:
+# - All config.pbtxt files
+# - All model.py files
+# - All service code
+# - ComfyUI modules
+COPY triton_model_repository/ /models/
+
+# Ensure ComfyUI is properly set up
+# ComfyUI should already be in triton_model_repository/shared_comfyui/
+RUN if [ ! -d "/models/shared_comfyui/comfy" ]; then \
+    echo "Warning: ComfyUI not found in image"; \
+    fi
+
+# Create directories for runtime model downloads
+RUN mkdir -p /models/shared_models/{vae,clip,diffusion_models,loras} && \
+    chmod -R 755 /models
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV TRITON_MODEL_REPOSITORY=/models
+ENV COMFYUI_PATH=/models/shared_comfyui
+
+# Expose Triton ports
+EXPOSE 8000 8001 8002
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/v2/health/ready || exit 1
+
+# Default command: start Triton server
+# Models will be downloaded at runtime via volume mount or download script
+CMD ["tritonserver", "--model-repository=/models", "--log-verbose=1", "--strict-model-config=false"]

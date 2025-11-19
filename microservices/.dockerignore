@@ -1,0 +1,52 @@
+# Ignore large files and directories when building Docker image
+
+# Test results
+test_results/
+*.log
+*.json
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Documentation (keep only essential)
+*.md
+!README.md
+
+# Large model files (download at runtime)
+triton_model_repository/shared_models/**/*.safetensors
+triton_model_repository/shared_models/**/*.ckpt
+triton_model_repository/shared_models/**/*.pt
+triton_model_repository/shared_models/**/*.pth
+
+# Keep directory structure but not large files
+!triton_model_repository/shared_models/**/
+
+# Test data
+test_data/
+input/
+output/
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
+
