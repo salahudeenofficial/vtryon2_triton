@@ -12,7 +12,8 @@ echo ""
 
 MICROSERVICES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TRITON_REPO="${MICROSERVICES_DIR}/triton_model_repository"
-TRITON_VERSION="2.45.0"
+# Use a more recent/stable version - check https://github.com/triton-inference-server/server/releases
+TRITON_VERSION="2.48.0"
 
 echo "Microservices Dir: ${MICROSERVICES_DIR}"
 echo "Triton Repository: ${TRITON_REPO}"
@@ -62,13 +63,19 @@ else
     echo "Extracting..."
     tar -xzf "${TRITON_PKG}"
     
-    # Rename to consistent name
-    if [ -d "tritonserver-${TRITON_VERSION}-ubuntu2404" ]; then
-        mv "tritonserver-${TRITON_VERSION}-ubuntu2404" tritonserver
-    elif [ -d "tritonserver-${TRITON_VERSION}-ubuntu2204" ]; then
-        mv "tritonserver-${TRITON_VERSION}-ubuntu2204" tritonserver
-    elif [ -d "tritonserver-${TRITON_VERSION}-ubuntu2004" ]; then
-        mv "tritonserver-${TRITON_VERSION}-ubuntu2004" tritonserver
+    # Find and rename extracted directory (name varies by version)
+    EXTRACTED_DIR=$(find . -maxdepth 1 -type d -name "tritonserver-*" | head -1)
+    if [ -n "$EXTRACTED_DIR" ]; then
+        mv "$EXTRACTED_DIR" tritonserver
+        echo "✓ Extracted to: tritonserver/"
+    else
+        echo "⚠️  Warning: Could not find extracted directory, checking current directory..."
+        if [ -d "tritonserver" ]; then
+            echo "✓ Triton directory already exists"
+        else
+            echo "❌ Extraction failed or unexpected structure"
+            exit 1
+        fi
     fi
     
     # Cleanup
