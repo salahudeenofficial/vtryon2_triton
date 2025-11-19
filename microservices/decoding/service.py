@@ -119,8 +119,19 @@ def setup_comfyui() -> None:
             folder_paths.add_model_folder_path("vae", str(vae_path), is_default=True)
             print(f"Added VAE model path: {vae_path}")
         
+        # Add CLIP/text_encoders path - CLIPLoader uses "text_encoders" folder (not "clip")
+        clip_path = models_dir / "clip"
+        text_encoders_path = models_dir / "text_encoders"
+        if clip_path.exists():
+            # Add to "text_encoders" since CLIPLoader uses that (see nodes.py line 951)
+            folder_paths.add_model_folder_path("text_encoders", str(clip_path), is_default=True)
+            print(f"Added CLIP model path (as text_encoders): {clip_path}")
+        if text_encoders_path.exists():
+            folder_paths.add_model_folder_path("text_encoders", str(text_encoders_path), is_default=True)
+            print(f"Added text_encoders model path: {text_encoders_path}")
+        
         # Add other model paths if they exist
-        for model_type in ["checkpoints", "loras", "clip", "text_encoders", "diffusion_models"]:
+        for model_type in ["checkpoints", "loras", "diffusion_models"]:
             model_path = models_dir / model_type
             if model_path.exists():
                 folder_paths.add_model_folder_path(model_type, str(model_path), is_default=False)
@@ -310,83 +321,85 @@ def decode_latent_to_image(
         # Import ComfyUI nodes
         from nodes import VAELoader, VAEDecode
         
-        # Resolve model paths - use folder_paths to find models (already configured in setup_comfyui)
-        import folder_paths
-        
-        # Get VAE model path from folder_paths
-        vae_paths = folder_paths.get_folder_paths("vae")
-        vae_model_path = None
-        for vae_dir in vae_paths:
-            potential_path = Path(vae_dir) / vae_model_name
-            if potential_path.exists():
-                vae_model_path = potential_path
-                break
-        
-        if vae_model_path is None:
-            # Fallback to Config path
-            vae_model_path = Config.get_vae_model_path()
-            if not vae_model_path.exists():
-                raise VAEModelNotFoundError(f"VAE model not found: {vae_model_name}. Searched in: {vae_paths}")
-        
-        vaeloader = VAELoader()
-        vae_output = vaeloader.load_vae(vae_name=vae_model_name)
-        vae = get_value_at_index(vae_output, 0)
-        
-        # Prepare latent for decoder
-        latent_dict = prepare_latent_for_decoder(latent)
-        
-        # Decode latent to image
-        vaedecode = VAEDecode()
-        decode_output = vaedecode.decode(
-            samples=latent_dict,
-            vae=vae
-        )
-        image_tensor_raw = get_value_at_index(decode_output, 0)
-        
-        # Extract image tensor
-        image_tensor = image_tensor_raw
-        if isinstance(image_tensor, dict):
-            if "image" in image_tensor:
-                image_tensor = image_tensor["image"]
-            elif "pixels" in image_tensor:
-                image_tensor = image_tensor["pixels"]
-            elif len(image_tensor) == 1:
-                image_tensor = list(image_tensor.values())[0]
-        
-        if isinstance(image_tensor, (list, tuple)):
-            # Take first image if batch
-            image_tensor = image_tensor[0] if len(image_tensor) > 0 else image_tensor
-        
-        # Ensure it's a tensor
-        if not isinstance(image_tensor, torch.Tensor):
-            raise DecodingFailedError(f"Expected tensor, got {type(image_tensor)}: {image_tensor}")
-        
-        # Get image shape
-        image_shape = list(image_tensor.shape)
-        # Normalize shape to [height, width, channels] for reporting
-        if len(image_shape) == 4:
-            # [batch, height, width, channels]
-            image_shape = image_shape[1:]
-        elif len(image_shape) == 3:
-            # [height, width, channels]
-            pass
-        else:
-            raise DecodingFailedError(f"Unexpected image tensor shape: {image_tensor.shape}")
-        
-        # Save image if requested
-        image_file_path = None
-        file_size = None
-        if save_image:
-            output_dir_obj = ensure_directory_exists(Path(output_dir))
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            image_filename = f"{output_filename}_{timestamp}.{output_format}"
-            image_path = output_dir_obj / image_filename
+        # Use torch.inference_mode() to match original workflow and optimize memory
+        with torch.inference_mode():
+            # Resolve model paths - use folder_paths to find models (already configured in setup_comfyui)
+            import folder_paths
             
-            image_file_path, file_size, _ = save_image_tensor(
-                image_tensor,
-                image_path,
-                output_format
+            # Get VAE model path from folder_paths
+            vae_paths = folder_paths.get_folder_paths("vae")
+            vae_model_path = None
+            for vae_dir in vae_paths:
+                potential_path = Path(vae_dir) / vae_model_name
+                if potential_path.exists():
+                    vae_model_path = potential_path
+                    break
+            
+            if vae_model_path is None:
+                # Fallback to Config path
+                vae_model_path = Config.get_vae_model_path()
+                if not vae_model_path.exists():
+                    raise VAEModelNotFoundError(f"VAE model not found: {vae_model_name}. Searched in: {vae_paths}")
+            
+            vaeloader = VAELoader()
+            vae_output = vaeloader.load_vae(vae_name=vae_model_name)
+            vae = get_value_at_index(vae_output, 0)
+            
+            # Prepare latent for decoder
+            latent_dict = prepare_latent_for_decoder(latent)
+            
+            # Decode latent to image
+            vaedecode = VAEDecode()
+            decode_output = vaedecode.decode(
+                samples=latent_dict,
+                vae=vae
             )
+            image_tensor_raw = get_value_at_index(decode_output, 0)
+            
+            # Extract image tensor
+            image_tensor = image_tensor_raw
+            if isinstance(image_tensor, dict):
+                if "image" in image_tensor:
+                    image_tensor = image_tensor["image"]
+                elif "pixels" in image_tensor:
+                    image_tensor = image_tensor["pixels"]
+                elif len(image_tensor) == 1:
+                    image_tensor = list(image_tensor.values())[0]
+            
+            if isinstance(image_tensor, (list, tuple)):
+                # Take first image if batch
+                image_tensor = image_tensor[0] if len(image_tensor) > 0 else image_tensor
+            
+            # Ensure it's a tensor
+            if not isinstance(image_tensor, torch.Tensor):
+                raise DecodingFailedError(f"Expected tensor, got {type(image_tensor)}: {image_tensor}")
+            
+            # Get image shape
+            image_shape = list(image_tensor.shape)
+            # Normalize shape to [height, width, channels] for reporting
+            if len(image_shape) == 4:
+                # [batch, height, width, channels]
+                image_shape = image_shape[1:]
+            elif len(image_shape) == 3:
+                # [height, width, channels]
+                pass
+            else:
+                raise DecodingFailedError(f"Unexpected image tensor shape: {image_tensor.shape}")
+            
+            # Save image if requested
+            image_file_path = None
+            file_size = None
+            if save_image:
+                output_dir_obj = ensure_directory_exists(Path(output_dir))
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                image_filename = f"{output_filename}_{timestamp}.{output_format}"
+                image_path = output_dir_obj / image_filename
+                
+                image_file_path, file_size, _ = save_image_tensor(
+                    image_tensor,
+                    image_path,
+                    output_format
+                )
         
         processing_time_ms = int((time.time() - start_time) * 1000)
         

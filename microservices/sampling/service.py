@@ -124,8 +124,19 @@ def setup_comfyui() -> None:
             folder_paths.add_model_folder_path("loras", str(loras_path), is_default=True)
             print(f"Added loras path: {loras_path}")
         
+        # Add CLIP/text_encoders path - CLIPLoader uses "text_encoders" folder (not "clip")
+        clip_path = models_dir / "clip"
+        text_encoders_path = models_dir / "text_encoders"
+        if clip_path.exists():
+            # Add to "text_encoders" since CLIPLoader uses that (see nodes.py line 951)
+            folder_paths.add_model_folder_path("text_encoders", str(clip_path), is_default=True)
+            print(f"Added CLIP model path (as text_encoders): {clip_path}")
+        if text_encoders_path.exists():
+            folder_paths.add_model_folder_path("text_encoders", str(text_encoders_path), is_default=True)
+            print(f"Added text_encoders model path: {text_encoders_path}")
+        
         # Add other model paths if they exist
-        for model_type in ["checkpoints", "clip", "vae", "text_encoders"]:
+        for model_type in ["checkpoints", "vae"]:
             model_path = models_dir / model_type
             if model_path.exists():
                 folder_paths.add_model_folder_path(model_type, str(model_path), is_default=False)
@@ -295,129 +306,131 @@ def sample_latent(
         from nodes import UNETLoader, LoraLoaderModelOnly, KSampler
         from nodes import NODE_CLASS_MAPPINGS
         
-        # Resolve model paths - use folder_paths to find models (already configured in setup_comfyui)
-        import folder_paths
-        
-        # Get UNET model path from folder_paths
-        diffusion_model_paths = folder_paths.get_folder_paths("diffusion_models")
-        unet_model_path = None
-        for diffusion_dir in diffusion_model_paths:
-            potential_path = Path(diffusion_dir) / unet_model_name
-            if potential_path.exists():
-                unet_model_path = potential_path
-                break
-        
-        if unet_model_path is None:
-            # Fallback to Config path
-            unet_model_path = Config.get_unet_model_path()
-            if not unet_model_path.exists():
-                raise UNETModelNotFoundError(f"UNET model not found: {unet_model_name}. Searched in: {diffusion_model_paths}")
-        
-        unetloader = UNETLoader()
-        unet_output = unetloader.load_unet(
-            unet_name=unet_model_name,
-            weight_dtype="default"
-        )
-        unet_model = get_value_at_index(unet_output, 0)
-        
-        # Get LoRA model path from folder_paths
-        lora_paths = folder_paths.get_folder_paths("loras")
-        lora_model_path = None
-        for lora_dir in lora_paths:
-            potential_path = Path(lora_dir) / lora_model_name
-            if potential_path.exists():
-                lora_model_path = potential_path
-                break
-        
-        if lora_model_path is None:
-            # Fallback to Config path
-            lora_model_path = Config.get_lora_model_path()
-            if not lora_model_path.exists():
-                raise LoRAModelNotFoundError(f"LoRA model not found: {lora_model_name}. Searched in: {lora_paths}")
-        
-        loraloadermodelonly = LoraLoaderModelOnly()
-        lora_output = loraloadermodelonly.load_lora_model_only(
-            lora_name=lora_model_name,
-            strength_model=lora_strength,
-            model=unet_model
-        )
-        lora_model = get_value_at_index(lora_output, 0)
-        
-        # Apply ModelSamplingAuraFlow
-        if "ModelSamplingAuraFlow" not in NODE_CLASS_MAPPINGS:
-            raise SamplingFailedError("ModelSamplingAuraFlow node not found in custom nodes")
-        
-        modelsamplingauraflow = NODE_CLASS_MAPPINGS["ModelSamplingAuraFlow"]()
-        auraflow_output = modelsamplingauraflow.patch_aura(
-            shift=shift,
-            model=lora_model
-        )
-        auraflow_model = get_value_at_index(auraflow_output, 0)
-        
-        # Apply CFGNorm
-        if "CFGNorm" not in NODE_CLASS_MAPPINGS:
-            raise SamplingFailedError("CFGNorm node not found in custom nodes")
-        
-        cfgnorm = NODE_CLASS_MAPPINGS["CFGNorm"]()
-        cfgnorm_output = cfgnorm.EXECUTE_NORMALIZED(
-            strength=strength,
-            model=auraflow_model
-        )
-        final_model = get_value_at_index(cfgnorm_output, 0)
-        
-        # Prepare inputs for sampler
-        positive_cond = prepare_conditioning(positive_encoding)
-        negative_cond = prepare_conditioning(negative_encoding)
-        latent_img = prepare_latent_image(latent_image)
-        
-        # Run KSampler
-        ksampler = KSampler()
-        sampler_output = ksampler.sample(
-            seed=seed,
-            steps=steps,
-            cfg=cfg,
-            sampler_name=sampler_name,
-            scheduler=scheduler,
-            denoise=denoise,
-            model=final_model,
-            positive=positive_cond,
-            negative=negative_cond,
-            latent_image=latent_img
-        )
-        
-        sampled_latent_raw = get_value_at_index(sampler_output, 0)
-        
-        # Extract tensor from sampled latent output (might be dict with "samples" key)
-        sampled_latent = sampled_latent_raw
-        if isinstance(sampled_latent, dict):
-            if "samples" in sampled_latent:
-                sampled_latent = sampled_latent["samples"]
-            elif "latent" in sampled_latent:
-                sampled_latent = sampled_latent["latent"]
-            elif len(sampled_latent) == 1:
-                sampled_latent = list(sampled_latent.values())[0]
-        
-        if isinstance(sampled_latent, (list, tuple)):
-            sampled_latent = sampled_latent[0]
-        
-        # Ensure it's a tensor
-        if not isinstance(sampled_latent, torch.Tensor):
-            raise SamplingFailedError(f"Expected tensor, got {type(sampled_latent)}: {sampled_latent}")
-        
-        # Get sampled latent shape
-        sampled_latent_shape = list(sampled_latent.shape) if hasattr(sampled_latent, 'shape') else None
-        
-        # Save sampled latent tensor
-        sampled_latent_file_path = None
-        if save_tensor:
-            output_dir_obj = ensure_directory_exists(Path(output_dir))
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            sampled_filename = f"sampled_latent_{request_id}_{timestamp}.pt"
-            sampled_latent_file_path = output_dir_obj / sampled_filename
+        # Use torch.inference_mode() to match original workflow and optimize memory
+        with torch.inference_mode():
+            # Resolve model paths - use folder_paths to find models (already configured in setup_comfyui)
+            import folder_paths
             
-            # Save tensor
-            torch.save(sampled_latent, sampled_latent_file_path)
-            sampled_latent_file_path = str(sampled_latent_file_path)
+            # Get UNET model path from folder_paths
+            diffusion_model_paths = folder_paths.get_folder_paths("diffusion_models")
+            unet_model_path = None
+            for diffusion_dir in diffusion_model_paths:
+                potential_path = Path(diffusion_dir) / unet_model_name
+                if potential_path.exists():
+                    unet_model_path = potential_path
+                    break
+            
+            if unet_model_path is None:
+                # Fallback to Config path
+                unet_model_path = Config.get_unet_model_path()
+                if not unet_model_path.exists():
+                    raise UNETModelNotFoundError(f"UNET model not found: {unet_model_name}. Searched in: {diffusion_model_paths}")
+            
+            unetloader = UNETLoader()
+            unet_output = unetloader.load_unet(
+                unet_name=unet_model_name,
+                weight_dtype="default"
+            )
+            unet_model = get_value_at_index(unet_output, 0)
+            
+            # Get LoRA model path from folder_paths
+            lora_paths = folder_paths.get_folder_paths("loras")
+            lora_model_path = None
+            for lora_dir in lora_paths:
+                potential_path = Path(lora_dir) / lora_model_name
+                if potential_path.exists():
+                    lora_model_path = potential_path
+                    break
+            
+            if lora_model_path is None:
+                # Fallback to Config path
+                lora_model_path = Config.get_lora_model_path()
+                if not lora_model_path.exists():
+                    raise LoRAModelNotFoundError(f"LoRA model not found: {lora_model_name}. Searched in: {lora_paths}")
+            
+            loraloadermodelonly = LoraLoaderModelOnly()
+            lora_output = loraloadermodelonly.load_lora_model_only(
+                lora_name=lora_model_name,
+                strength_model=lora_strength,
+                model=unet_model
+            )
+            lora_model = get_value_at_index(lora_output, 0)
+            
+            # Apply ModelSamplingAuraFlow
+            if "ModelSamplingAuraFlow" not in NODE_CLASS_MAPPINGS:
+                raise SamplingFailedError("ModelSamplingAuraFlow node not found in custom nodes")
+            
+            modelsamplingauraflow = NODE_CLASS_MAPPINGS["ModelSamplingAuraFlow"]()
+            auraflow_output = modelsamplingauraflow.patch_aura(
+                shift=shift,
+                model=lora_model
+            )
+            auraflow_model = get_value_at_index(auraflow_output, 0)
+            
+            # Apply CFGNorm
+            if "CFGNorm" not in NODE_CLASS_MAPPINGS:
+                raise SamplingFailedError("CFGNorm node not found in custom nodes")
+            
+            cfgnorm = NODE_CLASS_MAPPINGS["CFGNorm"]()
+            cfgnorm_output = cfgnorm.EXECUTE_NORMALIZED(
+                strength=strength,
+                model=auraflow_model
+            )
+            final_model = get_value_at_index(cfgnorm_output, 0)
+            
+            # Prepare inputs for sampler
+            positive_cond = prepare_conditioning(positive_encoding)
+            negative_cond = prepare_conditioning(negative_encoding)
+            latent_img = prepare_latent_image(latent_image)
+            
+            # Run KSampler
+            ksampler = KSampler()
+            sampler_output = ksampler.sample(
+                seed=seed,
+                steps=steps,
+                cfg=cfg,
+                sampler_name=sampler_name,
+                scheduler=scheduler,
+                denoise=denoise,
+                model=final_model,
+                positive=positive_cond,
+                negative=negative_cond,
+                latent_image=latent_img
+            )
+            
+            sampled_latent_raw = get_value_at_index(sampler_output, 0)
+            
+            # Extract tensor from sampled latent output (might be dict with "samples" key)
+            sampled_latent = sampled_latent_raw
+            if isinstance(sampled_latent, dict):
+                if "samples" in sampled_latent:
+                    sampled_latent = sampled_latent["samples"]
+                elif "latent" in sampled_latent:
+                    sampled_latent = sampled_latent["latent"]
+                elif len(sampled_latent) == 1:
+                    sampled_latent = list(sampled_latent.values())[0]
+            
+            if isinstance(sampled_latent, (list, tuple)):
+                sampled_latent = sampled_latent[0]
+            
+            # Ensure it's a tensor
+            if not isinstance(sampled_latent, torch.Tensor):
+                raise SamplingFailedError(f"Expected tensor, got {type(sampled_latent)}: {sampled_latent}")
+            
+            # Get sampled latent shape
+            sampled_latent_shape = list(sampled_latent.shape) if hasattr(sampled_latent, 'shape') else None
+            
+            # Save sampled latent tensor
+            sampled_latent_file_path = None
+            if save_tensor:
+                output_dir_obj = ensure_directory_exists(Path(output_dir))
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                sampled_filename = f"sampled_latent_{request_id}_{timestamp}.pt"
+                sampled_latent_file_path = output_dir_obj / sampled_filename
+                
+                # Save tensor
+                torch.save(sampled_latent, sampled_latent_file_path)
+                sampled_latent_file_path = str(sampled_latent_file_path)
         
         processing_time_ms = int((time.time() - start_time) * 1000)
         

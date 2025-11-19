@@ -301,128 +301,132 @@ def encode_text_and_images(
         from nodes import CLIPLoader, VAELoader, LoadImage
         from nodes import NODE_CLASS_MAPPINGS
         
-        # Resolve model paths - use folder_paths to find models (already configured in setup_comfyui)
-        import folder_paths
-        
-        # Get CLIP model path from folder_paths (will use the paths we configured)
-        clip_paths = folder_paths.get_folder_paths("clip")
-        clip_model_path = None
-        for clip_dir in clip_paths:
-            potential_path = Path(clip_dir) / clip_model_name
-            if potential_path.exists():
-                clip_model_path = potential_path
-                break
-        
-        if clip_model_path is None:
-            # Fallback to Config path
-            clip_model_path = Config.get_clip_model_path()
-            if not clip_model_path.exists():
-                raise CLIPModelNotFoundError(f"CLIP model not found: {clip_model_name}. Searched in: {clip_paths}")
-        
-        cliploader = CLIPLoader()
-        clip_output = cliploader.load_clip(
-            clip_name=clip_model_name,
-            type="qwen_image",
-            device="default"
-        )
-        clip = get_value_at_index(clip_output, 0)
-        
-        # Get VAE model path from folder_paths
-        vae_paths = folder_paths.get_folder_paths("vae")
-        vae_model_path = None
-        for vae_dir in vae_paths:
-            potential_path = Path(vae_dir) / vae_model_name
-            if potential_path.exists():
-                vae_model_path = potential_path
-                break
-        
-        if vae_model_path is None:
-            # Fallback to Config path
-            vae_model_path = Config.get_vae_model_path()
-            if not vae_model_path.exists():
-                raise VAEModelNotFoundError(f"VAE model not found: {vae_model_name}. Searched in: {vae_paths}")
-        
-        vaeloader = VAELoader()
-        vae_output = vaeloader.load_vae(vae_name=vae_model_name)
-        vae = get_value_at_index(vae_output, 0)
-        
-        # Load image1 (masked person - needs scaling)
-        loadimage = LoadImage()
-        image1_output = loadimage.load_image(image=str(image1_path_obj))
-        image1 = get_value_at_index(image1_output, 0)
-        
-        # Get original image1 shape
-        image1_original_shape = list(image1.shape) if hasattr(image1, 'shape') else None
-        
-        # Scale image1
-        if "ImageScaleToTotalPixels" not in NODE_CLASS_MAPPINGS:
-            raise ScalingFailedError("ImageScaleToTotalPixels node not found in custom nodes")
-        
-        imagescaletototalpixels = NODE_CLASS_MAPPINGS["ImageScaleToTotalPixels"]()
-        scaled_image1_output = imagescaletototalpixels.EXECUTE_NORMALIZED(
-            upscale_method=upscale_method,
-            megapixels=megapixels,
-            image=image1,
-        )
-        scaled_image1 = get_value_at_index(scaled_image1_output, 0)
-        
-        # Load image2 (cloth - no scaling needed)
-        image2_output = loadimage.load_image(image=str(image2_path_obj))
-        image2 = get_value_at_index(image2_output, 0)
-        
-        # Get image2 shape
-        image2_shape = list(image2.shape) if hasattr(image2, 'shape') else None
-        
-        # Encode prompts using TextEncodeQwenImageEditPlus
-        if "TextEncodeQwenImageEditPlus" not in NODE_CLASS_MAPPINGS:
-            raise EncodingFailedError("TextEncodeQwenImageEditPlus node not found in custom nodes")
-        
-        textencodeqwenimageeditplus = NODE_CLASS_MAPPINGS["TextEncodeQwenImageEditPlus"]()
-        
-        # Encode positive prompt
-        positive_output = textencodeqwenimageeditplus.EXECUTE_NORMALIZED(
-            prompt=prompt,
-            clip=clip,
-            vae=vae,
-            image1=scaled_image1,
-            image2=image2,
-        )
-        positive_conditioning_raw = get_value_at_index(positive_output, 0)
-        
-        # Encode negative prompt
-        negative_output = textencodeqwenimageeditplus.EXECUTE_NORMALIZED(
-            prompt=negative_prompt,
-            clip=clip,
-            vae=vae,
-            image1=scaled_image1,
-            image2=image2,
-        )
-        negative_conditioning_raw = get_value_at_index(negative_output, 0)
-        
-        # Extract tensors from conditioning outputs
-        positive_tensor = extract_conditioning_tensor(positive_conditioning_raw)
-        negative_tensor = extract_conditioning_tensor(negative_conditioning_raw)
-        
-        # Get tensor shapes
-        positive_shape = list(positive_tensor.shape) if hasattr(positive_tensor, 'shape') else None
-        negative_shape = list(negative_tensor.shape) if hasattr(negative_tensor, 'shape') else None
-        
-        # Save tensors if requested
-        positive_file_path = None
-        negative_file_path = None
-        if save_tensor:
-            output_dir_obj = ensure_directory_exists(Path(output_dir))
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            positive_filename = f"positive_encoding_{request_id}_{timestamp}.pt"
-            negative_filename = f"negative_encoding_{request_id}_{timestamp}.pt"
-            positive_file_path = output_dir_obj / positive_filename
-            negative_file_path = output_dir_obj / negative_filename
+        # Use torch.inference_mode() to match original workflow and optimize memory
+        with torch.inference_mode():
+            # Resolve model paths - use folder_paths to find models (already configured in setup_comfyui)
+            import folder_paths
             
-            # Save tensors
-            torch.save(positive_tensor, positive_file_path)
-            torch.save(negative_tensor, negative_file_path)
-            positive_file_path = str(positive_file_path)
-            negative_file_path = str(negative_file_path)
+            # CLIPLoader uses "text_encoders" folder, not "clip" (check nodes.py line 951)
+            # But folder_paths["text_encoders"] includes both "text_encoders" and "clip" folders
+            # So we should check "text_encoders" paths, not "clip"
+            clip_paths = folder_paths.get_folder_paths("text_encoders")
+            clip_model_path = None
+            for clip_dir in clip_paths:
+                potential_path = Path(clip_dir) / clip_model_name
+                if potential_path.exists():
+                    clip_model_path = potential_path
+                    break
+            
+            if clip_model_path is None:
+                # Fallback to Config path
+                clip_model_path = Config.get_clip_model_path()
+                if not clip_model_path.exists():
+                    raise CLIPModelNotFoundError(f"CLIP model not found: {clip_model_name}. Searched in: {clip_paths}")
+            
+            cliploader = CLIPLoader()
+            clip_output = cliploader.load_clip(
+                clip_name=clip_model_name,
+                type="qwen_image",
+                device="default"
+            )
+            clip = get_value_at_index(clip_output, 0)
+            
+            # Get VAE model path from folder_paths
+            vae_paths = folder_paths.get_folder_paths("vae")
+            vae_model_path = None
+            for vae_dir in vae_paths:
+                potential_path = Path(vae_dir) / vae_model_name
+                if potential_path.exists():
+                    vae_model_path = potential_path
+                    break
+            
+            if vae_model_path is None:
+                # Fallback to Config path
+                vae_model_path = Config.get_vae_model_path()
+                if not vae_model_path.exists():
+                    raise VAEModelNotFoundError(f"VAE model not found: {vae_model_name}. Searched in: {vae_paths}")
+            
+            vaeloader = VAELoader()
+            vae_output = vaeloader.load_vae(vae_name=vae_model_name)
+            vae = get_value_at_index(vae_output, 0)
+            
+            # Load image1 (masked person - needs scaling)
+            loadimage = LoadImage()
+            image1_output = loadimage.load_image(image=str(image1_path_obj))
+            image1 = get_value_at_index(image1_output, 0)
+            
+            # Get original image1 shape
+            image1_original_shape = list(image1.shape) if hasattr(image1, 'shape') else None
+            
+            # Scale image1
+            if "ImageScaleToTotalPixels" not in NODE_CLASS_MAPPINGS:
+                raise ScalingFailedError("ImageScaleToTotalPixels node not found in custom nodes")
+            
+            imagescaletototalpixels = NODE_CLASS_MAPPINGS["ImageScaleToTotalPixels"]()
+            scaled_image1_output = imagescaletototalpixels.EXECUTE_NORMALIZED(
+                upscale_method=upscale_method,
+                megapixels=megapixels,
+                image=image1,
+            )
+            scaled_image1 = get_value_at_index(scaled_image1_output, 0)
+            
+            # Load image2 (cloth - no scaling needed)
+            image2_output = loadimage.load_image(image=str(image2_path_obj))
+            image2 = get_value_at_index(image2_output, 0)
+            
+            # Get image2 shape
+            image2_shape = list(image2.shape) if hasattr(image2, 'shape') else None
+            
+            # Encode prompts using TextEncodeQwenImageEditPlus
+            if "TextEncodeQwenImageEditPlus" not in NODE_CLASS_MAPPINGS:
+                raise EncodingFailedError("TextEncodeQwenImageEditPlus node not found in custom nodes")
+            
+            textencodeqwenimageeditplus = NODE_CLASS_MAPPINGS["TextEncodeQwenImageEditPlus"]()
+            
+            # Encode positive prompt
+            positive_output = textencodeqwenimageeditplus.EXECUTE_NORMALIZED(
+                prompt=prompt,
+                clip=clip,
+                vae=vae,
+                image1=scaled_image1,
+                image2=image2,
+            )
+            positive_conditioning_raw = get_value_at_index(positive_output, 0)
+            
+            # Encode negative prompt
+            negative_output = textencodeqwenimageeditplus.EXECUTE_NORMALIZED(
+                prompt=negative_prompt,
+                clip=clip,
+                vae=vae,
+                image1=scaled_image1,
+                image2=image2,
+            )
+            negative_conditioning_raw = get_value_at_index(negative_output, 0)
+            
+            # Extract tensors from conditioning outputs
+            positive_tensor = extract_conditioning_tensor(positive_conditioning_raw)
+            negative_tensor = extract_conditioning_tensor(negative_conditioning_raw)
+            
+            # Get tensor shapes
+            positive_shape = list(positive_tensor.shape) if hasattr(positive_tensor, 'shape') else None
+            negative_shape = list(negative_tensor.shape) if hasattr(negative_tensor, 'shape') else None
+            
+            # Save tensors if requested
+            positive_file_path = None
+            negative_file_path = None
+            if save_tensor:
+                output_dir_obj = ensure_directory_exists(Path(output_dir))
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                positive_filename = f"positive_encoding_{request_id}_{timestamp}.pt"
+                negative_filename = f"negative_encoding_{request_id}_{timestamp}.pt"
+                positive_file_path = output_dir_obj / positive_filename
+                negative_file_path = output_dir_obj / negative_filename
+                
+                # Save tensors
+                torch.save(positive_tensor, positive_file_path)
+                torch.save(negative_tensor, negative_file_path)
+                positive_file_path = str(positive_file_path)
+                negative_file_path = str(negative_file_path)
         
         processing_time_ms = int((time.time() - start_time) * 1000)
         
