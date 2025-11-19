@@ -123,27 +123,34 @@ done
 
 ## Phase 5: Triton Testing on VastAI
 
-### Step 5.1: Verify Docker Setup
+### Step 5.1: Determine Your Setup
 
-**First, check your VastAI instance type:**
+**Check your VastAI instance type:**
 
 ```bash
-# Check if Docker is available
-docker --version
-docker ps
+# Check if you're in a container
+cat /proc/1/cgroup | grep docker
+
+# Check Docker availability
+docker --version 2>/dev/null && docker ps 2>/dev/null || echo "Docker not available"
 
 # Check GPU access
 nvidia-smi
-
-# Check if you're in a container (optional)
-cat /proc/1/cgroup | grep docker
 ```
 
-**Most VastAI instances are VMs with Docker installed** - this works normally.
-
-**If your VastAI instance IS a Docker container**, see `TRITON_DOCKER_SETUP.md` for Docker-in-Docker solutions.
-
 ### Step 5.2: Install Triton Server
+
+**⚠️ IMPORTANT: If your VastAI instance is a container** (like `vastai/base-image_cuda-13.0.1-cudnn-devel-ubuntu24.04-py313/jupyter`), **use direct installation** (recommended):
+
+```bash
+cd microservices
+chmod +x setup_triton_direct.sh
+./setup_triton_direct.sh
+```
+
+This installs Triton directly without Docker, which is more reliable in containerized environments.
+
+**Alternative: If Docker is available and socket is accessible:**
 
 ```bash
 # Pull Triton Docker image
@@ -152,23 +159,25 @@ docker pull nvcr.io/nvidia/tritonserver:25.10-py3
 
 ### Step 5.3: Start Triton Server
 
-**Standard approach (works for most VastAI instances):**
+**Option A: Direct Installation (Recommended for Containerized VastAI)**
 
 ```bash
 cd /workspace/vtryon2_triton/microservices
 
-# Use the helper script (created by setup_triton_vastai.sh)
-./start_triton.sh
+# Start Triton directly
+./start_triton_direct.sh
 ```
 
-**Or manually:**
+**Option B: Docker (if Docker socket is accessible)**
 
 ```bash
+cd /workspace/vtryon2_triton/microservices
+
+# Try Docker socket mount approach
 docker run --gpus=all \
+  -v /var/run/docker.sock:/var/run/docker.sock \
   --shm-size=1g \
-  -p 8000:8000 \
-  -p 8001:8001 \
-  -p 8002:8002 \
+  -p 8000:8000 -p 8001:8001 -p 8002:8002 \
   -v $(pwd)/triton_model_repository:/models \
   nvcr.io/nvidia/tritonserver:25.10-py3 \
   tritonserver --model-repository=/models \
@@ -177,7 +186,7 @@ docker run --gpus=all \
 
 **Note**: Keep this running in a separate terminal or use `screen`/`tmux`
 
-**If Docker-in-Docker is needed** (VastAI is a container), see `TRITON_DOCKER_SETUP.md`.
+**See `TRITON_DOCKER_SETUP.md` for detailed options.**
 
 ### Step 5.3: Test Individual Models
 

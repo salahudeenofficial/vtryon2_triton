@@ -4,19 +4,20 @@
 
 VastAI instances typically come in two configurations:
 
-### 1. **Standard VastAI Instance (Most Common)**
+### 1. **Standard VastAI Instance**
 - **Type**: Virtual Machine (VM) or bare metal with Docker installed
 - **Docker Access**: Docker daemon runs on the host
 - **Running Containers**: You can run Docker containers normally
 - **GPU Access**: Direct GPU access via `--gpus=all`
 
-**This is the standard setup and works perfectly for running Triton.**
-
-### 2. **Containerized VastAI Instance (Less Common)**
+### 2. **Containerized VastAI Instance (Your Case)**
 - **Type**: VastAI instance itself is a Docker container
+- **Base Image**: `vastai/base-image_cuda-13.0.1-cudnn-devel-ubuntu24.04-py313/jupyter`
 - **Docker Access**: Requires Docker-in-Docker (DinD) or Docker socket mounting
 - **Running Containers**: Requires special configuration
-- **GPU Access**: May need additional setup
+- **GPU Access**: Should work if host Docker has GPU access configured
+
+**⚠️ IMPORTANT: Your VastAI instance is a container, so you need one of the solutions below.**
 
 ---
 
@@ -66,51 +67,90 @@ docker run --gpus=all \
 
 ---
 
-## Solution 2: Containerized VastAI Instance (Docker-in-Docker)
+## Solution 2: Containerized VastAI Instance (Docker-in-Docker) - YOUR CASE
 
-If your VastAI instance IS a Docker container, you have two options:
+Since your VastAI instance is based on `vastai/base-image_cuda-13.0.1-cudnn-devel-ubuntu24.04-py313/jupyter`, you need one of these approaches:
 
-### Option A: Mount Docker Socket (Easier)
+### Option A: Mount Docker Socket (Recommended - Try This First)
 
-This allows the container to use the host's Docker daemon:
+This allows the VastAI container to use the host's Docker daemon:
 
+**Step 1: Check if Docker socket is accessible**
 ```bash
-# Inside VastAI container, run Triton with Docker socket mounted
+# Inside your VastAI container
+ls -la /var/run/docker.sock
+```
+
+**Step 2: If accessible, run Triton with socket mounted**
+```bash
+cd /workspace/vtryon2_triton/microservices
+
 docker run --gpus=all \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v $(pwd)/triton_model_repository:/models \
   -p 8000:8000 -p 8001:8001 -p 8002:8002 \
+  --shm-size=1g \
   nvcr.io/nvidia/tritonserver:25.10-py3 \
-  tritonserver --model-repository=/models
+  tritonserver --model-repository=/models \
+  --log-verbose=1
 ```
 
-**Note**: This requires the VastAI container to have access to `/var/run/docker.sock`.
+**If `/var/run/docker.sock` is not accessible**, you'll need to:
+1. Ask VastAI support to mount it, OR
+2. Use Option B (install Triton directly)
 
-### Option B: Install Triton Directly (No Docker)
+### Option B: Install Triton Directly (No Docker) - RECOMMENDED FOR YOUR CASE
 
-If Docker-in-Docker is problematic, install Triton directly on the VastAI instance:
+Since you're in a containerized environment, installing Triton directly is often more reliable:
+
+**Step 1: Install Triton Server Binary**
 
 ```bash
-# Install Triton server directly (not in Docker)
-# This is more complex but avoids Docker-in-Docker issues
+cd /workspace/vtryon2_triton/microservices
 
-# Download Triton server binary
-wget https://github.com/triton-inference-server/server/releases/download/v2.45.0/tritonserver-2.45.0-ubuntu2004.tar.gz
-tar -xzf tritonserver-2.45.0-ubuntu2004.tar.gz
+# Download Triton server (Ubuntu 24.04 compatible)
+# Check latest version: https://github.com/triton-inference-server/server/releases
+TRITON_VERSION="2.45.0"
+wget https://github.com/triton-inference-server/server/releases/download/v${TRITON_VERSION}/tritonserver-${TRITON_VERSION}-ubuntu2404.tar.gz
 
-# Run Triton directly
-./tritonserver/bin/tritonserver --model-repository=./triton_model_repository
+# Extract
+tar -xzf tritonserver-${TRITON_VERSION}-ubuntu2404.tar.gz
+
+# Move to convenient location
+mv tritonserver-${TRITON_VERSION}-ubuntu2404 tritonserver
+```
+
+**Step 2: Install Python Backend Dependencies**
+
+```bash
+# Triton Python backend needs these
+pip install tritonclient[all] numpy
+
+# Your existing dependencies should already be installed
+```
+
+**Step 3: Run Triton Directly**
+
+```bash
+cd /workspace/vtryon2_triton/microservices
+
+# Run Triton server
+./tritonserver/bin/tritonserver \
+  --model-repository=./triton_model_repository \
+  --log-verbose=1 \
+  --strict-model-config=false
 ```
 
 **Pros:**
-- No Docker-in-Docker complexity
-- Direct GPU access
-- Simpler setup
+- ✅ No Docker-in-Docker complexity
+- ✅ Direct GPU access (CUDA 13.0.1 already in your base image)
+- ✅ Simpler setup
+- ✅ Better performance (no container overhead)
+- ✅ Works reliably in containerized environments
 
 **Cons:**
-- Need to install dependencies manually
-- More setup steps
-- Less portable
+- Need to manage Triton binary updates manually
+- Slightly less portable (but fine for your use case)
 
 ---
 
