@@ -4,29 +4,27 @@ max_batch_size: 1
 
 input [
   {
-    name: "image1"
+    name: "image1_path"
     data_type: TYPE_STRING
-    dims: [ 1 ]
+    dims: [ -1 ]
   },
   {
-    name: "image2"
+    name: "image2_path"
     data_type: TYPE_STRING
-    dims: [ 1 ]
+    dims: [ -1 ]
   },
   {
     name: "prompt"
     data_type: TYPE_STRING
-    dims: [ 1 ]
+    dims: [ -1 ]
   }
 ]
 
-output [
-  {
-    name: "output_image"
-    data_type: TYPE_FP32
-    dims: [-1, 1176, 880, 3]
-  }
-]
+output {
+  name: "output_image"
+  data_type: TYPE_FP32
+  dims: [ 1176, 880, 3 ]
+}
 
 ensemble_scheduling {
   step [
@@ -34,24 +32,24 @@ ensemble_scheduling {
       model_name: "latent_encoder"
       model_version: -1
       input_map {
-        key: "input_image"
-        value: "image1"
+        key: "image_path"
+        value: "image1_path"
       }
       output_map {
         key: "latent"
-        value: "latent_image"
+        value: "latent_encoded"
       }
     },
     {
       model_name: "text_encoder"
       model_version: -1
       input_map {
-        key: "image1"
-        value: "image1"
+        key: "image1_path"
+        value: "image1_path"
       }
       input_map {
-        key: "image2"
-        value: "image2"
+        key: "image2_path"
+        value: "image2_path"
       }
       input_map {
         key: "prompt"
@@ -79,7 +77,7 @@ ensemble_scheduling {
       }
       input_map {
         key: "latent_image"
-        value: "latent_image"
+        value: "latent_encoded"
       }
       output_map {
         key: "sampled_latent"
@@ -100,4 +98,3 @@ ensemble_scheduling {
     }
   ]
 }
-

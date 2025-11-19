@@ -477,146 +477,118 @@ This document contains:
 
 ---
 
-## Phase 3: Complete Repository Setup with Models (VastAI)
+## Phase 3: Complete Repository Setup with Models
 
-**NOTE**: Phases 3-8 are executed entirely on VastAI instances due to local resource constraints.
+**⚠️ NOTE**: For local development, Phase 3 can be SKIPPED. Models will be downloaded on VastAI during final deployment. See `LOCAL_TESTING_PLAN.md` for local workflow.
 
-### Step 3.1: Setup on VastAI Instance
+### Step 3.1: Setup Shared Models Directory
 
-**Goal**: Clone repository and run setup on VastAI
+**Goal**: Download/copy models to shared location (ONLY on VastAI)
 
 **Tasks**:
-- [ ] SSH into VastAI instance
-- [ ] Clone repository: `git clone https://github.com/salahudeenofficial/vtryon2_triton.git`
-- [ ] Run `microservices/setup_vastai.sh` to download models and setup environment
-- [ ] Run `microservices/setup_triton_vastai.sh` to prepare Triton repository
-- [ ] Verify all models in `triton_model_repository/shared_models/`
-- [ ] Verify ComfyUI in `triton_model_repository/shared_comfyui/`
-- [ ] Verify config.pbtxt files exist
+- [ ] Copy VAE model to `triton_model_repository/shared_models/vae/`
+- [ ] Copy CLIP model to `triton_model_repository/shared_models/clip/`
+- [ ] Copy UNET model to `triton_model_repository/shared_models/diffusion_models/`
+- [ ] Copy LoRA model to `triton_model_repository/shared_models/loras/`
+- [ ] Verify all model files exist and are accessible
+- [ ] Document model paths in `triton_model_repository/MODEL_PATHS.md`
 
-**Deliverable**: Complete repository setup on VastAI
+**Deliverable**: All models in shared_models directory
 
-**Checkpoint**: ✅ Repository ready on VastAI
+**Checkpoint**: ✅ Models ready (on VastAI only)
+
+**Local Alternative**: Skip this phase. Models downloaded during VastAI deployment.
 
 ---
 
-## Phase 4: Python Backend Implementation (VastAI)
+## Phase 4: Triton Configuration Files Creation
 
-**NOTE**: Config files are already generated (Phase 2). This phase focuses on implementing Python backend models.
+**✅ CAN BE DONE LOCALLY** - No models needed! Uses extracted test data.
 
-### Step 4.1: Create Model Template (VastAI)
+### Step 4.1: Copy Test Results to Project
 
-**Goal**: Create base template for Python backend models
+**Goal**: Copy test results from VastAI to local project
 
-**Create on VastAI**: `triton_model_repository/_templates/model_template.py`
+**Tasks**:
+- [ ] Copy test results: `cp -r /home/fashionx/Desktop/test_results microservices/`
+- [ ] Verify all `TRITON_CONFIG_DATA.json` files are present
+- [ ] Review extracted data for completeness
+
+**Deliverable**: Test results in project directory
+
+**Checkpoint**: ✅ Test results available
+
+---
+
+### Step 4.2: Create Config Generator Script
+
+**Goal**: Automate config.pbtxt generation from test results
+
+**Create**: `microservices/create_triton_configs.py`
+
+**Tasks**:
+- [ ] Read all `TRITON_CONFIG_DATA.json` files
+- [ ] Generate `config.pbtxt` for each service
+- [ ] Generate ensemble `config.pbtxt`
+- [ ] Validate config syntax
+- [ ] Output to `triton_model_repository/`
+
+**Deliverable**: `create_triton_configs.py` script
+
+**Checkpoint**: ✅ Script ready
+
+---
+
+### Step 4.3: Create Individual Model Config Files
+
+**Goal**: Create config.pbtxt for each model using extracted data
+
+**Use Data From**: `test_results/*/TRITON_CONFIG_DATA.json`
+
+**Run**: `python create_triton_configs.py`
+
+#### 4.1.1: Latent Encoder Config
+**Source**: `test_results/latent_encoder/TRITON_CONFIG_DATA.json`
+
+**Create**: `triton_model_repository/latent_encoder/config.pbtxt`
 
 **Include**:
-- [ ] TritonPythonModel class structure
-- [ ] Initialize method template (setup ComfyUI, load models)
-- [ ] Execute method template (process requests)
-- [ ] Finalize method template (cleanup)
-- [ ] Error handling patterns
-- [ ] Logging setup
-- [ ] Path resolution for shared models and ComfyUI
+- [ ] Platform: `backend: "python"`
+- [ ] Max batch size: From extracted data
+- [ ] Input tensor: Shape and data type from extracted data
+- [ ] Output tensor: Shape and data type from extracted data
+- [ ] Instance group: Count from extracted data
+- [ ] Dynamic batching: Configuration from extracted data
+- [ ] Model directory: Path to shared models
 
-**Deliverable**: Model template on VastAI
+**Deliverable**: `latent_encoder/config.pbtxt`
 
-**Checkpoint**: ✅ Template ready
+#### 4.1.2: Text Encoder Config
+**Repeat for text_encoder**
 
----
+**Deliverable**: `text_encoder/config.pbtxt`
 
-### Step 4.2: Copy Service Code to Model Directories (VastAI)
+#### 4.1.3: Sampling Config
+**Repeat for sampling**
 
-**Goal**: Copy service files to each model's version directory
+**Deliverable**: `sampling/config.pbtxt`
 
-**On VastAI, run**:
-```bash
-cd microservices/triton_model_repository
-for service in latent_encoder text_encoder sampling decoding; do
-    mkdir -p ${service}/1
-    cp ../${service}/{service.py,config.py,utils.py,errors.py} ${service}/1/
-done
-```
+#### 4.1.4: Decoding Config
+**Repeat for decoding**
 
-**Checkpoint**: ✅ Service code copied
+**Deliverable**: `decoding/config.pbtxt`
+
+**Checkpoint**: ✅ All individual model configs created
 
 ---
 
-### Step 4.3: Implement Latent Encoder Model (VastAI)
-
-**Goal**: Create `triton_model_repository/latent_encoder/1/model.py`
-
-**Tasks**:
-- [ ] Copy template to `latent_encoder/1/model.py`
-- [ ] Implement initialize():
-  - [ ] Setup ComfyUI path: `../../shared_comfyui/`
-  - [ ] Setup model paths: `../../shared_models/`
-  - [ ] Set environment variables: `MODEL_DIR`, `COMFYUI_PATH`
-  - [ ] Import and initialize service
-- [ ] Implement execute():
-  - [ ] Extract input (image path string)
-  - [ ] Call `encode_image_to_latent()` from service
-  - [ ] Convert output tensor to Triton format
-  - [ ] Return response
-- [ ] Implement finalize():
-  - [ ] Cleanup resources
-
-**Deliverable**: Working `latent_encoder/1/model.py` on VastAI
-
-**Checkpoint**: ✅ Latent encoder model implemented
-
----
-
-### Step 4.4: Implement Text Encoder Model (VastAI)
-
-**Repeat Step 4.3 for text_encoder**
-
-**Additional Considerations**:
-- [ ] Multiple inputs: image1 (string), image2 (string), prompt (string)
-- [ ] Multiple outputs: positive_encoding, negative_encoding
-- [ ] String input handling (decode from bytes)
-
-**Deliverable**: Working `text_encoder/1/model.py` on VastAI
-
-**Checkpoint**: ✅ Text encoder model implemented
-
----
-
-### Step 4.5: Implement Sampling Model (VastAI)
-
-**Repeat Step 4.3 for sampling**
-
-**Additional Considerations**:
-- [ ] Multiple inputs: positive_encoding (string path), negative_encoding (string path), latent_image (string path), seed (int64)
-- [ ] Load tensors from file paths
-- [ ] Longest processing time
-
-**Deliverable**: Working `sampling/1/model.py` on VastAI
-
-**Checkpoint**: ✅ Sampling model implemented
-
----
-
-### Step 4.6: Implement Decoding Model (VastAI)
-
-**Repeat Step 4.3 for decoding**
-
-**Additional Considerations**:
-- [ ] Input: latent (string path to tensor file)
-- [ ] Output: image tensor
-- [ ] Image format handling
-
-**Deliverable**: Working `decoding/1/model.py` on VastAI
-
-**Checkpoint**: ✅ Decoding model implemented
-
----
-
-### Step 4.7: Create Ensemble Config (VastAI)
+### Step 4.2: Create Ensemble Config
 
 **Goal**: Create ensemble model configuration
 
-**Create on VastAI**: `triton_model_repository/vtryon_pipeline/config.pbtxt`
+**Use Data From**: `test_results/pipeline/TRITON_CONFIG_DATA.json`
+
+**Create**: `triton_model_repository/vtryon_pipeline/config.pbtxt`
 
 **Include**:
 - [ ] Platform: `platform: "ensemble"`
@@ -624,167 +596,307 @@ done
 - [ ] Outputs: output_image (from extracted data)
 - [ ] Ensemble steps: All 4 services in sequence
 - [ ] Input/output mappings: Based on extracted tensor names
+- [ ] Max inflight requests: Based on concurrency analysis
 
-**Deliverable**: `vtryon_pipeline/config.pbtxt` on VastAI
+**Deliverable**: `vtryon_pipeline/config.pbtxt`
 
 **Checkpoint**: ✅ Ensemble config created
 
 ---
 
-## Phase 5: Triton Testing on VastAI
+## Phase 5: Python Backend Implementation
 
-### Step 5.1: Install and Start Triton Server (VastAI)
+### Step 5.1: Create Model Template
 
-**Goal**: Run Triton server on VastAI instance
+**Goal**: Create base template for Python backend models
 
-**⚠️ IMPORTANT: For containerized VastAI** (like `vastai/base-image_cuda-13.0.1-cudnn-devel-ubuntu24.04-py313/jupyter`), **use direct installation**:
+**Create**: `triton_model_repository/_templates/model_template.py`
 
-**Tasks on VastAI**:
-- [ ] Run `setup_triton_direct.sh` to install Triton directly (no Docker)
-- [ ] Start Triton using `start_triton_direct.sh` script
-- [ ] Verify server starts: Check logs
-- [ ] Verify models load: Check model status API: `curl http://localhost:8000/v2/models`
+**Include**:
+- [ ] TritonPythonModel class structure
+- [ ] Initialize method template
+- [ ] Execute method template
+- [ ] Finalize method template
+- [ ] Error handling patterns
+- [ ] Logging setup
 
-**Alternative (if Docker socket accessible)**:
+**Deliverable**: Model template
+
+**Checkpoint**: ✅ Template ready
+
+---
+
+### Step 5.2: Implement Latent Encoder Model
+
+**Goal**: Create `triton_model_repository/latent_encoder/1/model.py`
+
+**Tasks**:
+- [ ] Copy template
+- [ ] Implement initialize():
+  - [ ] Setup ComfyUI path (shared)
+  - [ ] Setup model paths (shared_models)
+  - [ ] Load models (VAE encoder)
+  - [ ] Initialize service
+- [ ] Implement execute():
+  - [ ] Extract input tensor
+  - [ ] Convert to numpy
+  - [ ] Call service function
+  - [ ] Convert output to tensor
+  - [ ] Return response
+- [ ] Implement finalize():
+  - [ ] Cleanup resources
+- [ ] Test with Triton server
+
+**Use Data From**: `test_results/latent_encoder/TRITON_CONFIG_DATA.json`
+
+**Deliverable**: Working `latent_encoder/1/model.py`
+
+**Checkpoint**: ✅ Latent encoder model working
+
+---
+
+### Step 5.3: Implement Text Encoder Model
+
+**Repeat Step 4.2 for text_encoder**
+
+**Additional Considerations**:
+- [ ] Multiple inputs (image1, image2, prompt)
+- [ ] Multiple outputs (positive_encoding, negative_encoding)
+- [ ] String input handling (prompt)
+
+**Deliverable**: Working `text_encoder/1/model.py`
+
+**Checkpoint**: ✅ Text encoder model working
+
+---
+
+### Step 5.4: Implement Sampling Model
+
+**Repeat Step 4.2 for sampling**
+
+**Additional Considerations**:
+- [ ] Multiple inputs from previous services
+- [ ] Longest processing time (may need optimization)
+
+**Deliverable**: Working `sampling/1/model.py`
+
+**Checkpoint**: ✅ Sampling model working
+
+---
+
+### Step 5.5: Implement Decoding Model
+
+**Repeat Step 4.2 for decoding**
+
+**Additional Considerations**:
+- [ ] Image output format
+- [ ] Post-processing if needed
+
+**Deliverable**: Working `decoding/1/model.py`
+
+**Checkpoint**: ✅ Decoding model working
+
+---
+
+## Phase 6: Local Triton Testing
+
+**⚠️ NOTE**: For local testing without models, see `LOCAL_TESTING_PLAN.md` for mock testing strategy.
+
+### Step 6.1: Local Config Validation (No Models Needed)
+
+**Goal**: Validate config.pbtxt files without running inference
+
+**Tasks**:
+- [ ] Validate config syntax (manual review or Triton tools)
+- [ ] Verify tensor shapes match extracted data
+- [ ] Check data types are correct
+- [ ] Validate ensemble structure
+- [ ] Review instance group configurations
+
+**Deliverable**: Validated config files
+
+**Checkpoint**: ✅ Configs validated
+
+---
+
+### Step 6.2: Mock Model Testing (Optional - Local)
+
+**Goal**: Test Triton structure with mock models
+
+**Tasks**:
+- [ ] Create mock model implementations (return dummy tensors with correct shapes)
+- [ ] Test Triton can load model structure
+- [ ] Test input/output tensor handling
+- [ ] Verify no import errors
+- [ ] Test config.pbtxt syntax
+
+**Deliverable**: Validated model structure
+
+**Checkpoint**: ✅ Model structure validated
+
+---
+
+### Step 6.3: Full Testing on VastAI (Required)
+
+**Goal**: Test with actual models on VastAI
+
+**Tasks**:
+- [ ] Deploy to VastAI instance
 - [ ] Pull Triton container: `docker pull nvcr.io/nvidia/tritonserver:25.10-py3`
-- [ ] Start Triton with Docker socket mount
+- [ ] Start Triton: `docker run --gpus=1 ... tritonserver --model-repository=/models`
+- [ ] Verify server starts: Check logs
+- [ ] Verify models load: Check model status API
+- [ ] Test individual models
+- [ ] Test ensemble model
+- [ ] Performance testing
 
-**Deliverable**: Running Triton server on VastAI
+**Deliverable**: Fully tested deployment
 
-**Checkpoint**: ✅ Triton server running on VastAI
-
----
-
-### Step 5.2: Test Individual Models (VastAI)
-
-**Goal**: Verify each model works independently
-
-**For each model on VastAI**:
-- [ ] Check model status: `curl http://localhost:8000/v2/models/{model_name}`
-- [ ] Create test script: `test_triton_{service}.py`
-- [ ] Send test inference request
-- [ ] Verify output shape and data type
-- [ ] Measure latency
-- [ ] Compare with Phase 2 test results
-
-**Deliverable**: All individual models tested and verified on VastAI
-
-**Checkpoint**: ✅ Individual models working on VastAI
+**Checkpoint**: ✅ All models working on VastAI
 
 ---
 
-### Step 5.3: Test Ensemble Model (VastAI)
+### Step 6.3: Test Ensemble Model
 
 **Goal**: Verify complete pipeline works
 
-**Tasks on VastAI**:
+**Tasks**:
 - [ ] Send request to ensemble model
 - [ ] Verify output
 - [ ] Measure total latency
-- [ ] Compare with Phase 2 pipeline test results
+- [ ] Compare with pipeline test results
 - [ ] Verify tensor flow between models
 
-**Deliverable**: Ensemble model working on VastAI
+**Deliverable**: Ensemble model working
 
-**Checkpoint**: ✅ Ensemble model working on VastAI
+**Checkpoint**: ✅ Ensemble model working
 
 ---
 
-### Step 5.4: Performance Testing (VastAI)
+### Step 6.4: Performance Testing
 
 **Goal**: Verify performance matches expectations
 
-**Tasks on VastAI**:
-- [ ] Download perf_analyzer: `wget https://github.com/triton-inference-server/server/releases/download/v2.45.0/perf_analyzer`
-- [ ] Test each model with perf_analyzer
+**Tasks**:
+- [ ] Test with perf_analyzer
 - [ ] Measure throughput
 - [ ] Measure latency (P50, P95, P99)
-- [ ] Compare with Phase 2 performance data
+- [ ] Compare with extracted performance data
 - [ ] Tune configuration if needed
 
-**Deliverable**: Performance test results from VastAI
+**Deliverable**: Performance test results
 
-**Checkpoint**: ✅ Performance verified on VastAI
+**Checkpoint**: ✅ Performance verified
 
 ---
 
-## Phase 6: Docker Container Preparation (VastAI)
+## Phase 7: Docker Container Preparation
 
-### Step 6.1: Create Dockerfile (VastAI)
+### Step 7.1: Create Dockerfile
 
 **Goal**: Create custom Triton Docker image
 
-**Create on VastAI**: `Dockerfile.triton`
+**Create**: `Dockerfile.triton`
 
 **Include**:
 - [ ] Base image: `nvcr.io/nvidia/tritonserver:25.10-py3`
 - [ ] System dependencies
 - [ ] Python dependencies (from requirements.txt)
-- [ ] ComfyUI setup (copy shared_comfyui)
-- [ ] Model repository copy (structure only, models mounted or downloaded)
+- [ ] ComfyUI setup
+- [ ] Model repository copy
 - [ ] Environment variables
-- [ ] Expose ports: 8000, 8001, 8002
+- [ ] Expose ports
 
-**Deliverable**: `Dockerfile.triton` on VastAI
+**Deliverable**: `Dockerfile.triton`
 
 **Checkpoint**: ✅ Dockerfile created
 
 ---
 
-### Step 6.2: Build Docker Image (VastAI)
+### Step 7.2: Build Docker Image
 
-**Goal**: Build and test Docker image on VastAI
+**Goal**: Build and test Docker image
 
-**Tasks on VastAI**:
+**Tasks**:
 - [ ] Build image: `docker build -t vtryon-triton:latest -f Dockerfile.triton .`
-- [ ] Test image: Run container on VastAI
-- [ ] Verify models load (mount shared_models or download in container)
+- [ ] Test image: Run container locally
+- [ ] Verify models load
 - [ ] Test inference
 - [ ] Optimize image size if needed
 
-**Deliverable**: Working Docker image on VastAI
+**Deliverable**: Working Docker image
 
-**Checkpoint**: ✅ Docker image ready on VastAI
-
----
-
-## Phase 7: Final Testing & Documentation (VastAI)
-
-### Step 7.1: Complete Testing Suite (VastAI)
-
-**Goal**: Comprehensive testing of all components
-
-**Tasks on VastAI**:
-- [ ] Test all individual models
-- [ ] Test ensemble model
-- [ ] Performance benchmarking
-- [ ] Load testing
-- [ ] Error handling tests
-- [ ] Resource monitoring
-- [ ] Compare results with Phase 2 data
-
-**Deliverable**: Complete test results from VastAI
-
-**Checkpoint**: ✅ All testing complete
+**Checkpoint**: ✅ Docker image ready
 
 ---
 
-### Step 7.2: Document Deployment Process (VastAI)
+### Step 7.3: Create Docker Compose (Optional)
+
+**Goal**: Easy local testing with docker-compose
+
+**Create**: `docker-compose.triton.yml`
+
+**Include**:
+- [ ] Triton service
+- [ ] Volume mounts
+- [ ] GPU access
+- [ ] Port mappings
+- [ ] Environment variables
+
+**Deliverable**: `docker-compose.triton.yml`
+
+**Checkpoint**: ✅ Docker compose ready
+
+---
+
+## Phase 8: VastAI Deployment Preparation
+
+### Step 8.1: Prepare Git Repository
+
+**Goal**: Clean repository for VastAI push
+
+**Tasks**:
+- [ ] Create `.gitignore` for large files
+- [ ] Document deployment process
+- [ ] Create deployment README
+- [ ] Tag repository version
+- [ ] Push to Git
+
+**Deliverable**: Clean Git repository
+
+**Checkpoint**: ✅ Repository ready
+
+---
+
+### Step 8.2: Create Deployment Scripts
+
+**Goal**: Scripts for VastAI deployment
+
+**Create**:
+- [ ] `deploy_to_vastai.sh`: Setup script for VastAI instance
+- [ ] `test_on_vastai.sh`: Test script
+- [ ] `vastai_config.yaml`: VastAI configuration
+
+**Deliverable**: Deployment scripts
+
+**Checkpoint**: ✅ Deployment scripts ready
+
+---
+
+### Step 8.3: Document Deployment Process
 
 **Goal**: Complete deployment documentation
 
-**Create on VastAI or locally**: `DEPLOYMENT.md`
+**Create**: `DEPLOYMENT.md`
 
 **Include**:
-- [ ] VastAI instance requirements
-- [ ] Setup instructions (setup_vastai.sh, setup_triton_vastai.sh)
-- [ ] Docker build and run instructions
-- [ ] Model download/placement instructions
+- [ ] VastAI instance setup
+- [ ] Git clone instructions
+- [ ] Docker build instructions
+- [ ] Model download (if not in image)
 - [ ] Triton server startup
 - [ ] Testing instructions
-- [ ] API usage examples
-- [ ] Troubleshooting guide
-- [ ] Performance benchmarks
+- [ ] Troubleshooting
 
 **Deliverable**: `DEPLOYMENT.md`
 
@@ -792,23 +904,39 @@ done
 
 ---
 
-### Step 7.3: Create Deployment Summary (VastAI)
+## Phase 9: VastAI Deployment & Testing
 
-**Goal**: Document final deployment state
+### Step 9.1: Deploy to VastAI
 
-**Create**: `DEPLOYMENT_RESULTS.md`
+**Goal**: Deploy containerized Triton server
 
-**Include**:
-- [ ] Deployment date and VastAI instance specs
-- [ ] All model statuses
-- [ ] Performance metrics
-- [ ] Resource usage
-- [ ] Known issues and solutions
-- [ ] Recommendations for production
+**Tasks**:
+- [ ] Create VastAI instance
+- [ ] Clone repository
+- [ ] Build Docker image (or pull from registry)
+- [ ] Run Triton server
+- [ ] Verify server is running
 
-**Deliverable**: `DEPLOYMENT_RESULTS.md`
+**Deliverable**: Running Triton server on VastAI
 
-**Checkpoint**: ✅ Deployment documented
+**Checkpoint**: ✅ Server deployed
+
+---
+
+### Step 9.2: Test on VastAI
+
+**Goal**: Verify everything works on VastAI
+
+**Tasks**:
+- [ ] Test individual models
+- [ ] Test ensemble model
+- [ ] Performance testing
+- [ ] Load testing
+- [ ] Monitor resources
+
+**Deliverable**: Verified working deployment
+
+**Checkpoint**: ✅ Deployment verified
 
 ---
 
@@ -867,35 +995,35 @@ done
 - ✅ Model sharing strategy decided
 - ✅ Master config document created
 
-### Phase 3 Complete When (VastAI):
-- ✅ Repository cloned on VastAI
-- ✅ Models downloaded to shared location on VastAI
-- ✅ ComfyUI setup on VastAI
+### Phase 3 Complete When:
+- ✅ Models downloaded/copied to shared location
 - ✅ All model files accessible
-- ✅ Service code copied to model directories
 
-### Phase 4 Complete When (VastAI):
-- ✅ Model template created
-- ✅ All Python backend models (model.py) implemented
-- ✅ Ensemble config created
-- ✅ All code in place for Triton
+### Phase 4-5 Complete When:
+- ✅ Triton repository structure created
+- ✅ All models in shared location
+- ✅ All config.pbtxt files created
+- ✅ All configs use extracted data (no guessing)
 
-### Phase 5 Complete When (VastAI):
-- ✅ Triton server running on VastAI
-- ✅ All individual models tested and working
-- ✅ Ensemble model tested and working
-- ✅ Performance testing completed
+### Phase 6 Complete When:
+- ✅ All Python backend models implemented
+- ✅ All models tested individually
+- ✅ All models work with Triton
 
-### Phase 6 Complete When (VastAI):
-- ✅ Dockerfile created
-- ✅ Docker image built and tested on VastAI
-- ✅ Container runs successfully
+### Phase 7-8 Complete When:
+- ✅ Ensemble model works
+- ✅ Performance matches expectations
+- ✅ No configuration changes needed
 
-### Phase 7 Complete When (VastAI):
-- ✅ All testing complete
-- ✅ Documentation created
-- ✅ Deployment results documented
-- ✅ Ready for production use
+### Phase 9 Complete When:
+- ✅ Docker image built and tested
+- ✅ Deployment scripts ready
+- ✅ Documentation complete
+
+### Phase 8 Complete When:
+- ✅ Deployed on VastAI
+- ✅ All tests passing
+- ✅ Performance verified
 
 ---
 
