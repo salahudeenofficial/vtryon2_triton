@@ -161,28 +161,49 @@ def test_basic_functionality():
     print("Test 1: Basic Functionality - Sampling")
     print("=" * 60)
     
-    # Use expected tensors from workflow_script_serial_test.py
-    test_positive = "test_outputs/text_encoder_positive_output.pt"
-    test_negative = "test_outputs/text_encoder_negative_output.pt"
-    test_latent = "test_outputs/latent_encoder_output.pt"
+    # Use expected tensors from workflow_script_serial_test.py (check multiple paths)
+    def find_test_file(filename):
+        paths = [
+            Path("test_outputs") / filename,
+            Path("../test_outputs") / filename,
+            Path(__file__).parent.parent / "test_outputs" / filename
+        ]
+        for path in paths:
+            if path.exists():
+                return str(path)
+        return f"test_outputs/{filename}"  # Return default if not found
+    
+    test_positive = find_test_file("text_encoder_positive_output.pt")
+    test_negative = find_test_file("text_encoder_negative_output.pt")
+    test_latent = find_test_file("latent_encoder_output.pt")
     
     results = {
         "test_name": "basic_functionality",
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
     }
     
-    # Load expected tensor if available
-    expected_tensor_path = Path("test_outputs/sampling_output.pt")
+    # Load expected tensor if available (check both current dir and parent dir)
+    expected_tensor_paths = [
+        Path("test_outputs/sampling_output.pt"),
+        Path("../test_outputs/sampling_output.pt"),
+        Path(__file__).parent.parent / "test_outputs" / "sampling_output.pt"
+    ]
     expected_tensor = None
-    if expected_tensor_path.exists():
-        try:
-            expected_tensor = torch.load(expected_tensor_path)
-            print(f"✓ Loaded expected tensor from: {expected_tensor_path}")
-            print(f"  Expected shape: {expected_tensor.shape}, dtype: {expected_tensor.dtype}")
-        except Exception as e:
-            print(f"⚠️  Could not load expected tensor: {e}")
-    else:
-        print(f"⚠️  Expected tensor not found: {expected_tensor_path}")
+    expected_tensor_path = None
+    
+    for path in expected_tensor_paths:
+        if path.exists():
+            expected_tensor_path = path
+            try:
+                expected_tensor = torch.load(path)
+                print(f"✓ Loaded expected tensor from: {path}")
+                print(f"  Expected shape: {expected_tensor.shape}, dtype: {expected_tensor.dtype}")
+                break
+            except Exception as e:
+                print(f"⚠️  Could not load expected tensor from {path}: {e}")
+    
+    if expected_tensor is None:
+        print(f"⚠️  Expected tensor not found in any of: {[str(p) for p in expected_tensor_paths]}")
         print("   Run workflow_script_serial_test.py first to generate expected outputs")
     
     try:
@@ -276,10 +297,21 @@ def test_resource_usage():
     initial_cpu = process.cpu_percent(interval=0.1)
     initial_system_cpu = psutil.cpu_percent(interval=0.1)
     
-    # Run inference
-    test_positive = "test_outputs/text_encoder_positive_output.pt"
-    test_negative = "test_outputs/text_encoder_negative_output.pt"
-    test_latent = "test_outputs/latent_encoder_output.pt"
+    # Run inference - find test files
+    def find_test_file(filename):
+        paths = [
+            Path("test_outputs") / filename,
+            Path("../test_outputs") / filename,
+            Path(__file__).parent.parent / "test_outputs" / filename
+        ]
+        for path in paths:
+            if path.exists():
+                return str(path)
+        return f"test_outputs/{filename}"
+    
+    test_positive = find_test_file("text_encoder_positive_output.pt")
+    test_negative = find_test_file("text_encoder_negative_output.pt")
+    test_latent = find_test_file("latent_encoder_output.pt")
     test_seed = 724723345395306
     
     if all(os.path.exists(p) for p in [test_positive, test_negative, test_latent]):
@@ -325,11 +357,15 @@ def test_resource_usage():
             total_gpu_memory = None
         
         # Calculate statistics
+        # Normalize CPU usage (process.cpu_percent can be >100% on multi-core)
         if cpu_samples:
-            avg_cpu = sum(cpu_samples) / len(cpu_samples)
-            max_cpu = max(cpu_samples)
+            avg_cpu = sum(cpu_samples) / len(cpu_samples) / cpu_info['logical_cores'] * 100
+            max_cpu = max(cpu_samples) / cpu_info['logical_cores'] * 100
+            avg_cpu = min(avg_cpu, 100.0)
+            max_cpu = min(max_cpu, 100.0)
         else:
-            avg_cpu = process.cpu_percent(interval=0.1)
+            cpu_pct = process.cpu_percent(interval=0.1)
+            avg_cpu = min(cpu_pct / cpu_info['logical_cores'] * 100, 100.0)
             max_cpu = avg_cpu
         
         # Per-core CPU analysis

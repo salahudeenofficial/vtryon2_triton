@@ -117,18 +117,28 @@ def test_basic_functionality():
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
     }
     
-    # Load expected tensor if available
-    expected_tensor_path = Path("test_outputs/latent_encoder_output.pt")
+    # Load expected tensor if available (check both current dir and parent dir)
+    expected_tensor_paths = [
+        Path("test_outputs/latent_encoder_output.pt"),
+        Path("../test_outputs/latent_encoder_output.pt"),
+        Path(__file__).parent.parent / "test_outputs" / "latent_encoder_output.pt"
+    ]
     expected_tensor = None
-    if expected_tensor_path.exists():
-        try:
-            expected_tensor = torch.load(expected_tensor_path)
-            print(f"✓ Loaded expected tensor from: {expected_tensor_path}")
-            print(f"  Expected shape: {expected_tensor.shape}, dtype: {expected_tensor.dtype}")
-        except Exception as e:
-            print(f"⚠️  Could not load expected tensor: {e}")
-    else:
-        print(f"⚠️  Expected tensor not found: {expected_tensor_path}")
+    expected_tensor_path = None
+    
+    for path in expected_tensor_paths:
+        if path.exists():
+            expected_tensor_path = path
+            try:
+                expected_tensor = torch.load(path)
+                print(f"✓ Loaded expected tensor from: {path}")
+                print(f"  Expected shape: {expected_tensor.shape}, dtype: {expected_tensor.dtype}")
+                break
+            except Exception as e:
+                print(f"⚠️  Could not load expected tensor from {path}: {e}")
+    
+    if expected_tensor is None:
+        print(f"⚠️  Expected tensor not found in any of: {[str(p) for p in expected_tensor_paths]}")
         print("   Run workflow_script_serial_test.py first to generate expected outputs")
     
     try:
@@ -291,11 +301,19 @@ def test_resource_usage():
             total_gpu_memory = None
         
         # Calculate statistics
+        # Note: psutil.cpu_percent() can return >100% on multi-core systems
+        # We need to normalize it or use system-wide CPU instead
         if cpu_samples:
-            avg_cpu = sum(cpu_samples) / len(cpu_samples)
-            max_cpu = max(cpu_samples)
+            # Normalize CPU usage (process.cpu_percent can be >100% on multi-core)
+            # Divide by number of cores to get per-core average, then multiply by 100 for percentage
+            avg_cpu = sum(cpu_samples) / len(cpu_samples) / cpu_info['logical_cores'] * 100
+            max_cpu = max(cpu_samples) / cpu_info['logical_cores'] * 100
+            # Cap at 100% for display
+            avg_cpu = min(avg_cpu, 100.0)
+            max_cpu = min(max_cpu, 100.0)
         else:
-            avg_cpu = process.cpu_percent(interval=0.1)
+            cpu_pct = process.cpu_percent(interval=0.1)
+            avg_cpu = min(cpu_pct / cpu_info['logical_cores'] * 100, 100.0)
             max_cpu = avg_cpu
         
         # Per-core CPU analysis

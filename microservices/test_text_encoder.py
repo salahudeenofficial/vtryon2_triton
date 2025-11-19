@@ -172,33 +172,40 @@ def test_basic_functionality():
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
     }
     
-    # Load expected tensors if available
-    expected_positive_path = Path("test_outputs/text_encoder_positive_output.pt")
-    expected_negative_path = Path("test_outputs/text_encoder_negative_output.pt")
+    # Load expected tensors if available (check both current dir and parent dir)
+    expected_paths = [
+        Path("test_outputs"),
+        Path("../test_outputs"),
+        Path(__file__).parent.parent / "test_outputs"
+    ]
     expected_positive = None
     expected_negative = None
+    expected_positive_path = None
+    expected_negative_path = None
     
-    if expected_positive_path.exists():
-        try:
-            expected_positive = torch.load(expected_positive_path)
-            print(f"✓ Loaded expected positive tensor from: {expected_positive_path}")
-            print(f"  Expected shape: {expected_positive.shape}, dtype: {expected_positive.dtype}")
-        except Exception as e:
-            print(f"⚠️  Could not load expected positive tensor: {e}")
-    else:
-        print(f"⚠️  Expected positive tensor not found: {expected_positive_path}")
+    for base_path in expected_paths:
+        pos_path = base_path / "text_encoder_positive_output.pt"
+        neg_path = base_path / "text_encoder_negative_output.pt"
+        
+        if pos_path.exists() and expected_positive is None:
+            try:
+                expected_positive = torch.load(pos_path)
+                expected_positive_path = pos_path
+                print(f"✓ Loaded expected positive tensor from: {pos_path}")
+                print(f"  Expected shape: {expected_positive.shape}, dtype: {expected_positive.dtype}")
+            except Exception as e:
+                print(f"⚠️  Could not load expected positive tensor from {pos_path}: {e}")
+        
+        if neg_path.exists() and expected_negative is None:
+            try:
+                expected_negative = torch.load(neg_path)
+                expected_negative_path = neg_path
+                print(f"✓ Loaded expected negative tensor from: {neg_path}")
+                print(f"  Expected shape: {expected_negative.shape}, dtype: {expected_negative.dtype}")
+            except Exception as e:
+                print(f"⚠️  Could not load expected negative tensor from {neg_path}: {e}")
     
-    if expected_negative_path.exists():
-        try:
-            expected_negative = torch.load(expected_negative_path)
-            print(f"✓ Loaded expected negative tensor from: {expected_negative_path}")
-            print(f"  Expected shape: {expected_negative.shape}, dtype: {expected_negative.dtype}")
-        except Exception as e:
-            print(f"⚠️  Could not load expected negative tensor: {e}")
-    else:
-        print(f"⚠️  Expected negative tensor not found: {expected_negative_path}")
-    
-    if not expected_positive_path.exists() or not expected_negative_path.exists():
+    if expected_positive is None or expected_negative is None:
         print("   Run workflow_script_serial_test.py first to generate expected outputs")
     
     try:
@@ -358,11 +365,15 @@ def test_resource_usage():
             total_gpu_memory = None
         
         # Calculate statistics
+        # Normalize CPU usage (process.cpu_percent can be >100% on multi-core)
         if cpu_samples:
-            avg_cpu = sum(cpu_samples) / len(cpu_samples)
-            max_cpu = max(cpu_samples)
+            avg_cpu = sum(cpu_samples) / len(cpu_samples) / cpu_info['logical_cores'] * 100
+            max_cpu = max(cpu_samples) / cpu_info['logical_cores'] * 100
+            avg_cpu = min(avg_cpu, 100.0)
+            max_cpu = min(max_cpu, 100.0)
         else:
-            avg_cpu = process.cpu_percent(interval=0.1)
+            cpu_pct = process.cpu_percent(interval=0.1)
+            avg_cpu = min(cpu_pct / cpu_info['logical_cores'] * 100, 100.0)
             max_cpu = avg_cpu
         
         # Per-core CPU analysis
