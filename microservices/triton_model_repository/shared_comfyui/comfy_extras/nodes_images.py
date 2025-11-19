@@ -17,7 +17,12 @@ import torch
 import comfy.utils
 
 from comfy.comfy_types import FileLocator, IO
-from server import PromptServer
+try:
+    from server import PromptServer
+except ImportError:
+    # For microservices, create a stub PromptServer
+    class PromptServer:
+        pass
 
 MAX_RESOLUTION = nodes.MAX_RESOLUTION
 
