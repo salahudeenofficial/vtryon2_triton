@@ -57,42 +57,85 @@ echo "=========================================="
 
 # Extract from OCI layout
 # OCI images store layers as tar files in blobs/sha256/ directories
+# The manifest tells us which blobs are layers
 ROOTFS="${TEMP_DIR}/rootfs"
 mkdir -p "${ROOTFS}"
 
 echo "Extracting from OCI layout..."
 
-# Find all layer tar files in the OCI layout
-LAYER_TARS=$(find "${TEMP_DIR}" -path "*/blobs/sha256/*.tar" -o -path "*/blobs/sha256/*.tar.gz" 2>/dev/null | sort)
+# Find the manifest file
+MANIFEST_FILE=$(find "${TEMP_DIR}" -name "manifest.json" -o -path "*/index.json" 2>/dev/null | head -1)
 
-if [ -z "$LAYER_TARS" ]; then
-    # Try alternative OCI structure
-    LAYER_TARS=$(find "${TEMP_DIR}" -type f \( -name "*.tar" -o -name "*.tar.gz" \) 2>/dev/null | sort)
-fi
-
-if [ -z "$LAYER_TARS" ]; then
-    echo "❌ No layer tar files found in OCI layout"
-    echo "   OCI layout structure:"
-    find "${TEMP_DIR}" -type f | head -10
-    rm -rf "${TEMP_DIR}"
-    exit 1
-fi
-
-echo "Found $(echo "$LAYER_TARS" | wc -l) layer(s) to extract..."
-
-# Extract all layers (they overlay each other)
-for LAYER_TAR in $LAYER_TARS; do
-    if [ -f "$LAYER_TAR" ]; then
-        echo "  Extracting layer: $(basename "$LAYER_TAR")"
-        # Extract, overwriting files from previous layers
-        tar -xf "$LAYER_TAR" -C "${ROOTFS}" 2>/dev/null || {
-            # Try gzip if tar fails
-            if [[ "$LAYER_TAR" == *.gz ]]; then
-                gunzip -c "$LAYER_TAR" | tar -xf - -C "${ROOTFS}" 2>/dev/null || true
+if [ -z "$MANIFEST_FILE" ] || [ ! -f "$MANIFEST_FILE" ]; then
+    echo "⚠️  Manifest not found, trying to identify tar files by content..."
+    # Try to identify tar files by checking file type
+    BLOBS_DIR=$(find "${TEMP_DIR}" -type d -name "sha256" | head -1)
+    if [ -n "$BLOBS_DIR" ] && [ -d "$BLOBS_DIR" ]; then
+        echo "Checking blob files to identify tar archives..."
+        for BLOB in "${BLOBS_DIR}"/*; do
+            if [ -f "$BLOB" ]; then
+                # Check if it's a tar file by content
+                if file "$BLOB" | grep -q "tar archive\|gzip compressed"; then
+                    echo "  Found tar blob: $(basename "$BLOB")"
+                    tar -xf "$BLOB" -C "${ROOTFS}" 2>/dev/null || {
+                        # Try gzip decompression first
+                        gunzip -c "$BLOB" 2>/dev/null | tar -xf - -C "${ROOTFS}" 2>/dev/null || true
+                    }
+                fi
             fi
-        }
+        done
     fi
-done
+else
+    echo "Reading manifest to find layer blobs..."
+    
+    # Extract layer digests from manifest
+    # OCI manifest format: layers have "digest" field with "sha256:..." format
+    if command -v jq >/dev/null 2>&1; then
+        # Use jq to parse manifest
+        LAYER_DIGESTS=$(jq -r '.layers[]?.digest // .config.digest // empty' "$MANIFEST_FILE" 2>/dev/null | grep -E "^sha256:" | sed 's/sha256://')
+        
+        if [ -z "$LAYER_DIGESTS" ]; then
+            # Try alternative manifest format
+            LAYER_DIGESTS=$(jq -r '.[]?.layers[]?.digest // .layers[]?.digest // empty' "$MANIFEST_FILE" 2>/dev/null | grep -E "^sha256:" | sed 's/sha256://')
+        fi
+        
+        if [ -n "$LAYER_DIGESTS" ]; then
+            echo "Found $(echo "$LAYER_DIGESTS" | wc -l) layer(s) in manifest"
+            BLOBS_DIR=$(find "${TEMP_DIR}" -type d -name "sha256" | head -1)
+            
+            for DIGEST in $LAYER_DIGESTS; do
+                LAYER_BLOB="${BLOBS_DIR}/${DIGEST}"
+                if [ -f "$LAYER_BLOB" ]; then
+                    echo "  Extracting layer: ${DIGEST:0:12}..."
+                    tar -xf "$LAYER_BLOB" -C "${ROOTFS}" 2>/dev/null || {
+                        # Try gzip decompression
+                        gunzip -c "$LAYER_BLOB" 2>/dev/null | tar -xf - -C "${ROOTFS}" 2>/dev/null || true
+                    }
+                fi
+            done
+        fi
+    fi
+    
+    # Fallback: try to identify tar files by checking all blobs
+    if [ ! -d "${ROOTFS}/opt" ] && [ ! -d "${ROOTFS}/usr" ]; then
+        echo "⚠️  Manifest parsing didn't work, trying file type detection..."
+        BLOBS_DIR=$(find "${TEMP_DIR}" -type d -name "sha256" | head -1)
+        if [ -n "$BLOBS_DIR" ] && [ -d "$BLOBS_DIR" ]; then
+            for BLOB in "${BLOBS_DIR}"/*; do
+                if [ -f "$BLOB" ]; then
+                    # Check file type
+                    FILE_TYPE=$(file "$BLOB" 2>/dev/null)
+                    if echo "$FILE_TYPE" | grep -qE "tar archive|gzip compressed|POSIX tar"; then
+                        echo "  Extracting tar blob: $(basename "$BLOB")"
+                        tar -xf "$BLOB" -C "${ROOTFS}" 2>/dev/null || {
+                            gunzip -c "$BLOB" 2>/dev/null | tar -xf - -C "${ROOTFS}" 2>/dev/null || true
+                        }
+                    fi
+                fi
+            done
+        fi
+    fi
+fi
 
 echo "✓ Layers extracted"
 
