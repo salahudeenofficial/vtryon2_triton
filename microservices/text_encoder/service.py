@@ -53,10 +53,9 @@ def import_custom_nodes_minimal() -> None:
 
 
 def setup_comfyui() -> None:
-    """Setup ComfyUI paths and initialize. Only runs once per process."""
+    """Setup ComfyUI paths and initialize. Only runs once."""
     global _comfyui_initialized
     
-    # If already initialized, skip
     if _comfyui_initialized:
         return
     
@@ -149,9 +148,15 @@ def setup_comfyui() -> None:
     # Import custom nodes (only once)
     import_custom_nodes_minimal()
     
-    # Mark as initialized
-    _comfyui_initialized = True
+    # Initialize model management
+    try:
+        import comfy.model_management as model_management
+        # Ensure model management is properly initialized
+        model_management.cleanup_models_gc()
+    except ImportError:
+        pass  # model_management might not be available in all setups
     
+    _comfyui_initialized = True
     print("ComfyUI initialized successfully")
 
 
@@ -463,6 +468,19 @@ def encode_text_and_images(
         # Always include tensors in result (for testing/comparison)
         result["positive_encoding_tensor"] = positive_tensor
         result["negative_encoding_tensor"] = negative_tensor
+        
+        # Cleanup: Move models to CPU and free memory
+        try:
+            import comfy.model_management as model_management
+            # Cleanup unused models
+            model_management.cleanup_models_gc()
+            # Clear CUDA cache if available
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except (ImportError, AttributeError):
+            # Fallback: just clear CUDA cache
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
         
         return result
         
