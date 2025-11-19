@@ -34,31 +34,55 @@ else
     UBUNTU_VERSION=$(lsb_release -rs 2>/dev/null || echo "24.04")
     echo "Detected Ubuntu version: ${UBUNTU_VERSION}"
     
-    # Use appropriate package
+    # Try multiple versions and package names
+    # Triton release naming can vary: ubuntu2404, ubuntu22.04, ubuntu2004, etc.
+    VERSIONS_TO_TRY=("${TRITON_VERSION}" "2.47.0" "2.46.0" "2.45.0")
+    PACKAGE_NAMES=()
+    
+    # Build list of package names to try
     if [[ "$UBUNTU_VERSION" == "24.04" ]]; then
-        TRITON_PKG="tritonserver-${TRITON_VERSION}-ubuntu2404.tar.gz"
+        PACKAGE_NAMES=("ubuntu2404" "ubuntu22.04" "ubuntu2004")
     elif [[ "$UBUNTU_VERSION" == "22.04" ]]; then
-        TRITON_PKG="tritonserver-${TRITON_VERSION}-ubuntu2204.tar.gz"
+        PACKAGE_NAMES=("ubuntu2204" "ubuntu22.04" "ubuntu2004")
     else
-        TRITON_PKG="tritonserver-${TRITON_VERSION}-ubuntu2004.tar.gz"
+        PACKAGE_NAMES=("ubuntu2004" "ubuntu22.04" "ubuntu2204")
     fi
     
-    TRITON_URL="https://github.com/triton-inference-server/server/releases/download/v${TRITON_VERSION}/${TRITON_PKG}"
+    DOWNLOAD_SUCCESS=false
+    TRITON_PKG=""
     
-    echo "Downloading: ${TRITON_URL}"
-    wget -q --show-progress "${TRITON_URL}" || {
-        echo "❌ Failed to download Triton server"
-        echo "   Trying alternative version..."
-        # Try generic version
-        TRITON_PKG="tritonserver-${TRITON_VERSION}-ubuntu2004.tar.gz"
-        TRITON_URL="https://github.com/triton-inference-server/server/releases/download/v${TRITON_VERSION}/${TRITON_PKG}"
-        wget -q --show-progress "${TRITON_URL}" || {
-            echo "❌ Download failed. Please check:"
-            echo "   1. Internet connection"
-            echo "   2. Triton version availability: https://github.com/triton-inference-server/server/releases"
-            exit 1
-        }
-    }
+    for VERSION in "${VERSIONS_TO_TRY[@]}"; do
+        for PKG_SUFFIX in "${PACKAGE_NAMES[@]}"; do
+            TRITON_PKG="tritonserver-${VERSION}-${PKG_SUFFIX}.tar.gz"
+            TRITON_URL="https://github.com/triton-inference-server/server/releases/download/v${VERSION}/${TRITON_PKG}"
+            
+            echo "Trying: ${TRITON_URL}"
+            if wget -q --spider "${TRITON_URL}" 2>/dev/null; then
+                echo "✓ Found valid URL: ${TRITON_URL}"
+                echo "Downloading..."
+                if wget -q --show-progress "${TRITON_URL}"; then
+                    DOWNLOAD_SUCCESS=true
+                    TRITON_VERSION="${VERSION}"
+                    break 2
+                fi
+            fi
+        done
+    done
+    
+    if [ "$DOWNLOAD_SUCCESS" = false ]; then
+        echo "❌ Failed to download Triton server after trying multiple versions"
+        echo ""
+        echo "Please manually download from:"
+        echo "  https://github.com/triton-inference-server/server/releases"
+        echo ""
+        echo "Or try installing via pip:"
+        echo "  pip install tritonclient[all]"
+        echo "  # Then use tritonserver from pip installation"
+        echo ""
+        echo "Or use Docker (if available):"
+        echo "  docker pull nvcr.io/nvidia/tritonserver:latest-py3"
+        exit 1
+    fi
     
     echo "Extracting..."
     tar -xzf "${TRITON_PKG}"
