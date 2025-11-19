@@ -1,8 +1,26 @@
 # How to Start Triton Inference Server
 
+## ⚠️ Important: Are You Inside a Docker Container?
+
+**If you're already inside a Docker container on VastAI**, you need to **exit the container first**:
+
+```bash
+# Exit the container
+exit
+
+# Now you're on the VastAI host
+# Then proceed with the steps below
+```
+
+See `RUNNING_IN_DOCKER.md` for more details.
+
+---
+
 ## Quick Start
 
 ### Option 1: Using Docker Run (Recommended)
+
+**Note**: Run this on the VastAI **host**, not inside a container.
 
 ```bash
 cd /path/to/vtryon2_triton/microservices
