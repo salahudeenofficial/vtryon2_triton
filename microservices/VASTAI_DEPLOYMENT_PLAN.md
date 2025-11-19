@@ -123,18 +123,47 @@ done
 
 ## Phase 5: Triton Testing on VastAI
 
-### Step 5.1: Install Triton Server
+### Step 5.1: Verify Docker Setup
+
+**First, check your VastAI instance type:**
+
+```bash
+# Check if Docker is available
+docker --version
+docker ps
+
+# Check GPU access
+nvidia-smi
+
+# Check if you're in a container (optional)
+cat /proc/1/cgroup | grep docker
+```
+
+**Most VastAI instances are VMs with Docker installed** - this works normally.
+
+**If your VastAI instance IS a Docker container**, see `TRITON_DOCKER_SETUP.md` for Docker-in-Docker solutions.
+
+### Step 5.2: Install Triton Server
 
 ```bash
 # Pull Triton Docker image
 docker pull nvcr.io/nvidia/tritonserver:25.10-py3
 ```
 
-### Step 5.2: Start Triton Server
+### Step 5.3: Start Triton Server
+
+**Standard approach (works for most VastAI instances):**
 
 ```bash
 cd /workspace/vtryon2_triton/microservices
 
+# Use the helper script (created by setup_triton_vastai.sh)
+./start_triton.sh
+```
+
+**Or manually:**
+
+```bash
 docker run --gpus=all \
   --shm-size=1g \
   -p 8000:8000 \
@@ -147,6 +176,8 @@ docker run --gpus=all \
 ```
 
 **Note**: Keep this running in a separate terminal or use `screen`/`tmux`
+
+**If Docker-in-Docker is needed** (VastAI is a container), see `TRITON_DOCKER_SETUP.md`.
 
 ### Step 5.3: Test Individual Models
 

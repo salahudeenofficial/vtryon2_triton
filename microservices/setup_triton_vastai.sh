@@ -161,6 +161,30 @@ echo "=========================================="
 if command -v docker >/dev/null 2>&1; then
     echo "✓ Docker is installed"
     docker --version
+    
+    # Check if we can access Docker daemon
+    if docker ps >/dev/null 2>&1; then
+        echo "✓ Docker daemon is accessible"
+    else
+        echo "⚠️  Warning: Cannot access Docker daemon"
+        echo "   You may need to:"
+        echo "   - Add user to docker group: sudo usermod -aG docker \$USER"
+        echo "   - Or run with sudo (not recommended)"
+        echo "   - Or if VastAI is a container, see TRITON_DOCKER_SETUP.md"
+    fi
+    
+    # Check GPU access
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        echo "✓ nvidia-smi available (GPU access should work)"
+    else
+        echo "⚠️  Warning: nvidia-smi not found - GPU access may not work"
+    fi
+    
+    # Check if we're in a container
+    if [ -f /proc/1/cgroup ] && grep -q docker /proc/1/cgroup 2>/dev/null; then
+        echo "⚠️  Note: Running inside a Docker container"
+        echo "   If Triton container fails, see TRITON_DOCKER_SETUP.md for Docker-in-Docker solutions"
+    fi
 else
     echo "⚠️  Docker not found. Installing..."
     curl -fsSL https://get.docker.com -o get-docker.sh
