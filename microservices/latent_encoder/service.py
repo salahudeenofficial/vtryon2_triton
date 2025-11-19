@@ -50,11 +50,33 @@ def import_custom_nodes_minimal() -> None:
 
 def setup_comfyui() -> None:
     """Setup ComfyUI paths and initialize."""
-    comfyui_path = Path(__file__).parent / "comfyui"
     microservice_dir = Path(__file__).parent
     
-    if not comfyui_path.exists():
-        raise ComfyUIInitializationError(f"ComfyUI directory not found: {comfyui_path}")
+    # Try multiple ComfyUI locations (for different deployment scenarios)
+    # 1. Shared ComfyUI in triton_model_repository (VastAI/Phase 2 testing)
+    # 2. Local comfyui directory (development)
+    # 3. Parent directory ComfyUI (if running from project root)
+    
+    comfyui_path = None
+    potential_paths = [
+        # Shared ComfyUI (for VastAI/Phase 2)
+        microservice_dir.parent.parent / "triton_model_repository" / "shared_comfyui",
+        # Local comfyui (development)
+        microservice_dir / "comfyui",
+        # Parent ComfyUI (project root)
+        microservice_dir.parent.parent / "ComfyUI",
+        microservice_dir.parent.parent / "comfyui",
+    ]
+    
+    for path in potential_paths:
+        if path.exists() and (path / "comfy").exists():
+            comfyui_path = path
+            break
+    
+    if comfyui_path is None:
+        raise ComfyUIInitializationError(
+            f"ComfyUI directory not found. Tried: {[str(p) for p in potential_paths]}"
+        )
     
     # Add ComfyUI to sys.path
     add_comfyui_directory_to_sys_path(comfyui_path)
