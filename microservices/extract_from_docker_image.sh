@@ -56,20 +56,37 @@ elif sudo podman pull "${TRITON_IMAGE}" 2>/dev/null; then
 # Try 5: Configure podman for rootless
 elif podman system migrate 2>/dev/null && podman pull "${TRITON_IMAGE}" 2>/dev/null; then
     PODMAN_PULL_SUCCESS=true
+# Try 6: Use skopeo (alternative tool, no daemon needed)
+elif command -v skopeo >/dev/null 2>&1; then
+    echo "⚠️  Podman failed, trying skopeo instead..."
+    echo ""
+    if [ -f "${MICROSERVICES_DIR}/extract_from_docker_skopeo.sh" ]; then
+        chmod +x "${MICROSERVICES_DIR}/extract_from_docker_skopeo.sh"
+        "${MICROSERVICES_DIR}/extract_from_docker_skopeo.sh"
+        exit 0
+    else
+        echo "❌ extract_from_docker_skopeo.sh not found"
+        echo "   Continuing with podman troubleshooting..."
+    fi
 fi
 
 if [ "$PODMAN_PULL_SUCCESS" = false ]; then
     echo "❌ Failed to pull image with podman"
     echo ""
     echo "=========================================="
-    echo "Alternative: Use PyTriton (Simpler)"
+    echo "Troubleshooting Options"
     echo "=========================================="
     echo ""
-    echo "Since podman has permission issues, use PyTriton instead:"
+    echo "Option 1: Try skopeo (alternative, no daemon needed):"
+    echo "  ./extract_from_docker_skopeo.sh"
     echo ""
+    echo "Option 2: Fix podman permissions:"
+    echo "  sudo podman pull ${TRITON_IMAGE}"
+    echo "  # Then run this script again"
+    echo ""
+    echo "Option 3: Use PyTriton + download server binary:"
     echo "  ./install_triton_via_pytriton.sh"
-    echo ""
-    echo "This installs Triton via pip and is much simpler."
+    echo "  # This will automatically download the server binary"
     echo ""
     exit 1
 fi
