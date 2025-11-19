@@ -140,21 +140,34 @@ nvidia-smi
 
 ### Step 5.2: Install Triton Server
 
-**⚠️ IMPORTANT: If your VastAI instance is a container** (like `vastai/base-image_cuda-13.0.1-cudnn-devel-ubuntu24.04-py313/jupyter`), **use direct installation** (recommended):
+**⚠️ IMPORTANT: If your VastAI instance is a container** (like `vastai/base-image_cuda-13.0.1-cudnn-devel-ubuntu24.04-py313/jupyter`), **use one of these methods**:
+
+**Method 1: Extract from Docker Image using Podman (Recommended - No Docker daemon needed)**
+
+```bash
+cd microservices
+chmod +x extract_from_docker_image.sh
+./extract_from_docker_image.sh
+```
+
+This uses `podman` (works without Docker daemon) to pull the Docker image and extract the Triton binary.
+
+**Method 2: Install via PyTriton (Alternative)**
+
+```bash
+cd microservices
+chmod +x install_triton_via_pytriton.sh
+./install_triton_via_pytriton.sh
+```
+
+This installs `nvidia-pytriton` which includes Triton server binaries.
+
+**Method 3: Direct Download (if links work)**
 
 ```bash
 cd microservices
 chmod +x setup_triton_direct.sh
 ./setup_triton_direct.sh
-```
-
-This installs Triton directly without Docker, which is more reliable in containerized environments.
-
-**Alternative: If Docker is available and socket is accessible:**
-
-```bash
-# Pull Triton Docker image
-docker pull nvcr.io/nvidia/tritonserver:25.10-py3
 ```
 
 ### Step 5.3: Start Triton Server
