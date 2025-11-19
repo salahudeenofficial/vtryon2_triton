@@ -13,11 +13,25 @@ from pathlib import Path
 import subprocess
 import psutil
 import threading
+import gc
 
 sys.path.insert(0, str(Path(__file__).parent / "text_encoder"))
 
 from service import encode_text_and_images
 from config import Config
+
+def cleanup_gpu_memory():
+    """Force cleanup of GPU memory by clearing caches and running garbage collection"""
+    if torch.cuda.is_available():
+        # Clear all CUDA caches
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
+        # Reset peak memory stats
+        torch.cuda.reset_peak_memory_stats()
+        # Run garbage collection to free Python objects
+        gc.collect()
+        # Clear cache again after GC
+        torch.cuda.empty_cache()
 
 def get_gpu_memory():
     """Get current GPU memory usage in MB"""
@@ -286,6 +300,9 @@ def test_basic_functionality():
         print(f"✗ Exception: {e}")
         import traceback
         traceback.print_exc()
+    finally:
+        # Clean up GPU memory after test
+        cleanup_gpu_memory()
     
     return results
 
@@ -472,6 +489,9 @@ def test_resource_usage():
         results['gpu_memory'] = {"used_mb": "TBD"}
         results['cpu_usage'] = {"peak_percent": "TBD"}
     
+    # Clean up GPU memory after test
+    cleanup_gpu_memory()
+    
     return results
 
 def main():
@@ -481,9 +501,21 @@ def main():
     print("=" * 60)
     print()
     
+    # Initial cleanup to start with clean GPU memory
+    cleanup_gpu_memory()
+    
     test_results = {}
     test_results['basic_functionality'] = test_basic_functionality()
+    
+    # Clean up between tests to prevent OOM
+    print("\n🧹 Cleaning up GPU memory between tests...")
+    cleanup_gpu_memory()
+    time.sleep(1)  # Give GPU time to free memory
+    
     test_results['resource_profiling'] = test_resource_usage()
+    
+    # Final cleanup
+    cleanup_gpu_memory()
     
     # Compile config data
     config_data = {
