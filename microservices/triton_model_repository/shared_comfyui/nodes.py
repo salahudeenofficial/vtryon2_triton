@@ -2197,7 +2197,7 @@ async def load_custom_node(module_path: str, ignore=set(), module_parent="custom
                         NODE_DISPLAY_NAME_MAPPINGS[schema.node_id] = schema.display_name
                 return True
             except Exception as e:
-                logging.warning(f"Error while calling comfy_entrypoint in {module_path}: {e}")
+                # Suppress warning for microservices - entrypoint errors are expected
                 return False
         else:
             # Suppress warning for microservices - not all modules need to be nodes
