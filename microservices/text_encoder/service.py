@@ -35,9 +35,6 @@ add_extra_model_paths = _text_encoder_utils.add_extra_model_paths
 generate_request_id = _text_encoder_utils.generate_request_id
 ensure_directory_exists = _text_encoder_utils.ensure_directory_exists
 
-# Global flag to track ComfyUI initialization
-_comfyui_initialized = False
-
 
 def import_custom_nodes_minimal() -> None:
     """
@@ -53,12 +50,7 @@ def import_custom_nodes_minimal() -> None:
 
 
 def setup_comfyui() -> None:
-    """Setup ComfyUI paths and initialize. Only runs once."""
-    global _comfyui_initialized
-    
-    if _comfyui_initialized:
-        return
-    
+    """Setup ComfyUI paths and initialize."""
     microservice_dir = Path(__file__).parent
     
     # Try multiple ComfyUI locations (for different deployment scenarios)
@@ -145,18 +137,9 @@ def setup_comfyui() -> None:
             if model_path.exists():
                 folder_paths.add_model_folder_path(model_type, str(model_path), is_default=False)
     
-    # Import custom nodes (only once)
+    # Import custom nodes
     import_custom_nodes_minimal()
     
-    # Initialize model management
-    try:
-        import comfy.model_management as model_management
-        # Ensure model management is properly initialized
-        model_management.cleanup_models_gc()
-    except ImportError:
-        pass  # model_management might not be available in all setups
-    
-    _comfyui_initialized = True
     print("ComfyUI initialized successfully")
 
 
@@ -337,7 +320,11 @@ def encode_text_and_images(
                 raise CLIPModelNotFoundError(f"CLIP model not found: {clip_model_name}. Searched in: {clip_paths}")
         
         cliploader = CLIPLoader()
-        clip_output = cliploader.load_clip(clip_name=clip_model_name)
+        clip_output = cliploader.load_clip(
+            clip_name=clip_model_name,
+            type="qwen_image",
+            device="default"
+        )
         clip = get_value_at_index(clip_output, 0)
         
         # Get VAE model path from folder_paths
@@ -469,23 +456,6 @@ def encode_text_and_images(
         result["positive_encoding_tensor"] = positive_tensor
         result["negative_encoding_tensor"] = negative_tensor
         
-        # Cleanup: Unload models and free memory
-        try:
-            import comfy.model_management as model_management
-            # Explicitly unload all models to free GPU memory
-            model_management.unload_all_models()
-            # Cleanup unused models
-            model_management.cleanup_models_gc()
-            # Clear CUDA cache if available
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()  # Ensure all operations are complete
-        except (ImportError, AttributeError):
-            # Fallback: just clear CUDA cache
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
-        
         return result
         
     except Exception as e:
@@ -493,19 +463,6 @@ def encode_text_and_images(
         
         error_code = type(e).__name__
         error_message = str(e)
-        
-        # Cleanup on error too
-        try:
-            import comfy.model_management as model_management
-            model_management.unload_all_models()
-            model_management.cleanup_models_gc()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
-        except (ImportError, AttributeError):
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
         
         return {
             "status": "error",
