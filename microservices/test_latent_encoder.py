@@ -34,6 +34,31 @@ def get_gpu_memory():
     except:
         return 0
 
+def compare_tensors(actual: torch.Tensor, expected: torch.Tensor, tolerance: float = 1e-5) -> dict:
+    """Compare actual tensor with expected tensor."""
+    comparison = {
+        "shapes_match": actual.shape == expected.shape,
+        "dtypes_match": actual.dtype == expected.dtype,
+        "max_diff": None,
+        "mean_diff": None,
+        "within_tolerance": None
+    }
+    
+    if comparison['shapes_match'] and comparison['dtypes_match']:
+        # Calculate differences
+        diff = torch.abs(actual.float() - expected.float())
+        comparison['max_diff'] = float(torch.max(diff).item())
+        comparison['mean_diff'] = float(torch.mean(diff).item())
+        comparison['within_tolerance'] = comparison['max_diff'] < tolerance
+        
+        # Calculate relative error
+        abs_expected = torch.abs(expected.float())
+        relative_diff = diff / (abs_expected + 1e-8)  # Avoid division by zero
+        comparison['max_relative_error'] = float(torch.max(relative_diff).item())
+        comparison['mean_relative_error'] = float(torch.mean(relative_diff).item())
+    
+    return comparison
+
 def test_basic_functionality():
     """Test 1: Basic functionality and extract tensor info"""
     print("=" * 60)
@@ -52,6 +77,20 @@ def test_basic_functionality():
         "test_name": "basic_functionality",
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
     }
+    
+    # Load expected tensor if available
+    expected_tensor_path = Path("test_outputs/latent_encoder_output.pt")
+    expected_tensor = None
+    if expected_tensor_path.exists():
+        try:
+            expected_tensor = torch.load(expected_tensor_path)
+            print(f"✓ Loaded expected tensor from: {expected_tensor_path}")
+            print(f"  Expected shape: {expected_tensor.shape}, dtype: {expected_tensor.dtype}")
+        except Exception as e:
+            print(f"⚠️  Could not load expected tensor: {e}")
+    else:
+        print(f"⚠️  Expected tensor not found: {expected_tensor_path}")
+        print("   Run workflow_script_serial_test.py first to generate expected outputs")
     
     try:
         # Run service
@@ -79,6 +118,20 @@ def test_basic_functionality():
                 "triton_type": "TYPE_FP32" if latent_tensor.dtype == torch.float32 else "TYPE_FP16"
             }
             
+            # Compare with expected tensor if available
+            if expected_tensor is not None:
+                comparison = compare_tensors(latent_tensor, expected_tensor)
+                results['comparison'] = comparison
+                
+                if comparison['within_tolerance']:
+                    print(f"✓ Output matches expected tensor (max diff: {comparison['max_diff']:.2e})")
+                else:
+                    print(f"⚠️  Output differs from expected tensor (max diff: {comparison['max_diff']:.2e})")
+                    if not comparison['shapes_match']:
+                        print(f"   Shape mismatch: actual {latent_tensor.shape} vs expected {expected_tensor.shape}")
+                    if not comparison['dtypes_match']:
+                        print(f"   Dtype mismatch: actual {latent_tensor.dtype} vs expected {expected_tensor.dtype}")
+            
             results['metadata'] = result.get('metadata', {})
             results['status'] = 'success'
             
@@ -95,6 +148,8 @@ def test_basic_functionality():
         results['status'] = 'error'
         results['error'] = str(e)
         print(f"✗ Exception: {e}")
+        import traceback
+        traceback.print_exc()
     
     return results
 
@@ -243,6 +298,10 @@ def main():
             "note": "Batch support may need implementation"
         },
         "resource_requirements": test_results['resource_profiling'].get('gpu_memory', {}),
+        "output_verification": {
+            "expected_tensor_path": "test_outputs/latent_encoder_output.pt",
+            "comparison": test_results['basic_functionality'].get('comparison', {})
+        },
         "performance": {
             "inference_time_ms": test_results['resource_profiling'].get('inference_time_seconds', 0) * 1000
         },
