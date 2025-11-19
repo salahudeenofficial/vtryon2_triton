@@ -55,25 +55,46 @@ echo "=========================================="
 echo "Step 2: Extracting Files"
 echo "=========================================="
 
-# Extract using umoci or directly from OCI layout
-if command -v umoci >/dev/null 2>&1; then
-    # Use umoci to extract
-    umoci unpack --image "${TEMP_DIR}/triton-image:latest" "${TEMP_DIR}/rootfs" || {
-        echo "⚠️  umoci unpack failed, trying alternative method..."
-    }
-    ROOTFS="${TEMP_DIR}/rootfs/rootfs"
-else
-    # Manual extraction from OCI layout
-    # OCI images are stored in blobs, we need to extract the layer
-    echo "Extracting from OCI layout..."
-    # Find the layer blob
-    LAYER_BLOB=$(find "${TEMP_DIR}" -name "*.tar" -o -name "*.tar.gz" | head -1)
-    if [ -n "$LAYER_BLOB" ]; then
-        mkdir -p "${TEMP_DIR}/rootfs"
-        tar -xf "${LAYER_BLOB}" -C "${TEMP_DIR}/rootfs" 2>/dev/null || true
-    fi
-    ROOTFS="${TEMP_DIR}/rootfs"
+# Extract from OCI layout
+# OCI images store layers as tar files in blobs/sha256/ directories
+ROOTFS="${TEMP_DIR}/rootfs"
+mkdir -p "${ROOTFS}"
+
+echo "Extracting from OCI layout..."
+
+# Find all layer tar files in the OCI layout
+LAYER_TARS=$(find "${TEMP_DIR}" -path "*/blobs/sha256/*.tar" -o -path "*/blobs/sha256/*.tar.gz" 2>/dev/null | sort)
+
+if [ -z "$LAYER_TARS" ]; then
+    # Try alternative OCI structure
+    LAYER_TARS=$(find "${TEMP_DIR}" -type f \( -name "*.tar" -o -name "*.tar.gz" \) 2>/dev/null | sort)
 fi
+
+if [ -z "$LAYER_TARS" ]; then
+    echo "❌ No layer tar files found in OCI layout"
+    echo "   OCI layout structure:"
+    find "${TEMP_DIR}" -type f | head -10
+    rm -rf "${TEMP_DIR}"
+    exit 1
+fi
+
+echo "Found $(echo "$LAYER_TARS" | wc -l) layer(s) to extract..."
+
+# Extract all layers (they overlay each other)
+for LAYER_TAR in $LAYER_TARS; do
+    if [ -f "$LAYER_TAR" ]; then
+        echo "  Extracting layer: $(basename "$LAYER_TAR")"
+        # Extract, overwriting files from previous layers
+        tar -xf "$LAYER_TAR" -C "${ROOTFS}" 2>/dev/null || {
+            # Try gzip if tar fails
+            if [[ "$LAYER_TAR" == *.gz ]]; then
+                gunzip -c "$LAYER_TAR" | tar -xf - -C "${ROOTFS}" 2>/dev/null || true
+            fi
+        }
+    fi
+done
+
+echo "✓ Layers extracted"
 
 # Create target directory
 mkdir -p "${TRITON_DIR}/bin"
@@ -81,21 +102,48 @@ mkdir -p "${TRITON_DIR}/lib"
 
 # Extract tritonserver binary
 echo "Extracting tritonserver binary..."
+BINARY_FOUND=false
+
+# Check expected locations
 if [ -f "${ROOTFS}/opt/tritonserver/bin/tritonserver" ]; then
+    mkdir -p "${TRITON_DIR}/bin"
     cp "${ROOTFS}/opt/tritonserver/bin/tritonserver" "${TRITON_DIR}/bin/tritonserver"
     echo "✓ Binary extracted from /opt/tritonserver/bin"
+    BINARY_FOUND=true
 elif [ -f "${ROOTFS}/usr/bin/tritonserver" ]; then
+    mkdir -p "${TRITON_DIR}/bin"
     cp "${ROOTFS}/usr/bin/tritonserver" "${TRITON_DIR}/bin/tritonserver"
     echo "✓ Binary extracted from /usr/bin"
+    BINARY_FOUND=true
 else
     echo "⚠️  Binary not found in expected locations"
-    echo "   Searching..."
-    find "${ROOTFS}" -name "tritonserver" -type f 2>/dev/null | head -1 | while read BINARY; do
-        if [ -n "$BINARY" ]; then
-            cp "$BINARY" "${TRITON_DIR}/bin/tritonserver"
-            echo "✓ Binary found and extracted: $BINARY"
-        fi
-    done
+    echo "   Searching in extracted files..."
+    
+    # Search for tritonserver binary
+    FOUND_BINARY=$(find "${ROOTFS}" -name "tritonserver" -type f -executable 2>/dev/null | head -1)
+    
+    if [ -n "$FOUND_BINARY" ] && [ -f "$FOUND_BINARY" ]; then
+        mkdir -p "${TRITON_DIR}/bin"
+        cp "$FOUND_BINARY" "${TRITON_DIR}/bin/tritonserver"
+        echo "✓ Binary found and extracted: $FOUND_BINARY"
+        BINARY_FOUND=true
+    else
+        echo "❌ Binary not found. Checking extracted structure..."
+        echo "   Root directory contents:"
+        ls -la "${ROOTFS}" 2>/dev/null | head -20
+        echo ""
+        echo "   /opt directory:"
+        ls -la "${ROOTFS}/opt" 2>/dev/null | head -10 || echo "   /opt not found"
+        echo ""
+        echo "   /usr/bin directory:"
+        ls -la "${ROOTFS}/usr/bin" 2>/dev/null | grep triton || echo "   /usr/bin/tritonserver not found"
+    fi
+fi
+
+if [ "$BINARY_FOUND" = false ]; then
+    echo "❌ Could not find tritonserver binary"
+    rm -rf "${TEMP_DIR}"
+    exit 1
 fi
 
 # Extract libraries
