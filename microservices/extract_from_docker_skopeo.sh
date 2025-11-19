@@ -185,11 +185,30 @@ mkdir -p "${TRITON_DIR}/lib"
 echo "Extracting tritonserver binary..."
 BINARY_FOUND=false
 
+# First, check what's in /opt/tritonserver
+if [ -d "${ROOTFS}/opt/tritonserver" ]; then
+    echo "   Checking /opt/tritonserver structure:"
+    ls -la "${ROOTFS}/opt/tritonserver" 2>/dev/null | head -20
+    echo ""
+    
+    # Check for bin directory
+    if [ -d "${ROOTFS}/opt/tritonserver/bin" ]; then
+        echo "   Contents of /opt/tritonserver/bin:"
+        ls -la "${ROOTFS}/opt/tritonserver/bin" 2>/dev/null | head -10
+        echo ""
+    fi
+fi
+
 # Check expected locations
 if [ -f "${ROOTFS}/opt/tritonserver/bin/tritonserver" ]; then
     mkdir -p "${TRITON_DIR}/bin"
     cp "${ROOTFS}/opt/tritonserver/bin/tritonserver" "${TRITON_DIR}/bin/tritonserver"
     echo "✓ Binary extracted from /opt/tritonserver/bin"
+    BINARY_FOUND=true
+elif [ -f "${ROOTFS}/opt/tritonserver/tritonserver" ]; then
+    mkdir -p "${TRITON_DIR}/bin"
+    cp "${ROOTFS}/opt/tritonserver/tritonserver" "${TRITON_DIR}/bin/tritonserver"
+    echo "✓ Binary extracted from /opt/tritonserver"
     BINARY_FOUND=true
 elif [ -f "${ROOTFS}/usr/bin/tritonserver" ]; then
     mkdir -p "${TRITON_DIR}/bin"
@@ -200,8 +219,13 @@ else
     echo "⚠️  Binary not found in expected locations"
     echo "   Searching in extracted files..."
     
-    # Search for tritonserver binary
-    FOUND_BINARY=$(find "${ROOTFS}" -name "tritonserver" -type f -executable 2>/dev/null | head -1)
+    # Search for tritonserver binary (more thorough)
+    FOUND_BINARY=$(find "${ROOTFS}" -type f \( -name "tritonserver" -o -name "*triton*server*" \) -executable 2>/dev/null | head -1)
+    
+    if [ -z "$FOUND_BINARY" ]; then
+        # Try finding any executable in tritonserver directory
+        FOUND_BINARY=$(find "${ROOTFS}/opt/tritonserver" -type f -executable 2>/dev/null | head -1)
+    fi
     
     if [ -n "$FOUND_BINARY" ] && [ -f "$FOUND_BINARY" ]; then
         mkdir -p "${TRITON_DIR}/bin"
@@ -213,16 +237,21 @@ else
         echo "   Root directory contents:"
         ls -la "${ROOTFS}" 2>/dev/null | head -20
         echo ""
-        echo "   /opt directory:"
-        ls -la "${ROOTFS}/opt" 2>/dev/null | head -10 || echo "   /opt not found"
+        echo "   /opt/tritonserver contents:"
+        find "${ROOTFS}/opt/tritonserver" -type f 2>/dev/null | head -20 || echo "   No files found"
         echo ""
         echo "   /usr/bin directory:"
-        ls -la "${ROOTFS}/usr/bin" 2>/dev/null | grep triton || echo "   /usr/bin/tritonserver not found"
+        ls -la "${ROOTFS}/usr/bin" 2>/dev/null | grep -i triton || echo "   /usr/bin/tritonserver not found"
     fi
 fi
 
 if [ "$BINARY_FOUND" = false ]; then
+    echo ""
     echo "❌ Could not find tritonserver binary"
+    echo ""
+    echo "Troubleshooting:"
+    echo "  1. Check if the binary exists: find ${ROOTFS} -name '*triton*' -type f"
+    echo "  2. Try downloading directly: ./download_triton_server.sh"
     rm -rf "${TEMP_DIR}"
     exit 1
 fi
