@@ -59,7 +59,9 @@ def setup_comfyui() -> None:
     
     comfyui_path = None
     potential_paths = [
-        # Shared ComfyUI (for VastAI/Phase 2)
+        # Shared ComfyUI in microservices/triton_model_repository (VastAI/Phase 2)
+        microservice_dir.parent / "triton_model_repository" / "shared_comfyui",
+        # Shared ComfyUI in project root triton_model_repository (alternative)
         microservice_dir.parent.parent / "triton_model_repository" / "shared_comfyui",
         # Local comfyui (development)
         microservice_dir / "comfyui",
@@ -94,7 +96,9 @@ def setup_comfyui() -> None:
     
     models_dir = None
     potential_model_dirs = [
-        # Shared models (for VastAI/Phase 2)
+        # Shared models in microservices/triton_model_repository (VastAI/Phase 2)
+        microservice_dir.parent / "triton_model_repository" / "shared_models",
+        # Shared models in project root triton_model_repository (alternative)
         microservice_dir.parent.parent / "triton_model_repository" / "shared_models",
         # Local models (development)
         (microservice_dir / Config.model_dir).resolve(),

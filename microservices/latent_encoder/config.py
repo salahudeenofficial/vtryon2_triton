@@ -16,7 +16,10 @@ class Config:
     # Model Configuration
     # Try shared models first (for VastAI/Phase 2), then fall back to local
     _current_dir = Path(__file__).parent.resolve()
-    _shared_models = _current_dir.parent.parent / "triton_model_repository" / "shared_models"
+    # Try microservices/triton_model_repository first, then project root
+    _shared_models = _current_dir.parent / "triton_model_repository" / "shared_models"
+    if not _shared_models.exists():
+        _shared_models = _current_dir.parent.parent / "triton_model_repository" / "shared_models"
     if _shared_models.exists():
         model_dir = os.getenv("MODEL_DIR", str(_shared_models))
     else:
@@ -32,7 +35,9 @@ class Config:
         # Try to find ComfyUI in multiple locations
         current_dir = Path(__file__).parent.resolve()
         potential_paths = [
-            # Shared ComfyUI (for VastAI/Phase 2)
+            # Shared ComfyUI in microservices/triton_model_repository (VastAI/Phase 2)
+            current_dir.parent / "triton_model_repository" / "shared_comfyui",
+            # Shared ComfyUI in project root triton_model_repository (alternative)
             current_dir.parent.parent / "triton_model_repository" / "shared_comfyui",
             # Local comfyui (development)
             current_dir / "comfyui",
