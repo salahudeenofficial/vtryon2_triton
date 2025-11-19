@@ -121,18 +121,56 @@ else
         echo "⚠️  Manifest parsing didn't work, trying file type detection..."
         BLOBS_DIR=$(find "${TEMP_DIR}" -type d -name "sha256" | head -1)
         if [ -n "$BLOBS_DIR" ] && [ -d "$BLOBS_DIR" ]; then
+            BLOB_COUNT=$(find "$BLOBS_DIR" -type f | wc -l)
+            echo "  Checking ${BLOB_COUNT} blob(s) for tar archives..."
+            
+            EXTRACTED_COUNT=0
             for BLOB in "${BLOBS_DIR}"/*; do
                 if [ -f "$BLOB" ]; then
                     # Check file type
-                    FILE_TYPE=$(file "$BLOB" 2>/dev/null)
+                    FILE_TYPE=$(file "$BLOB" 2>/dev/null || echo "")
                     if echo "$FILE_TYPE" | grep -qE "tar archive|gzip compressed|POSIX tar"; then
-                        echo "  Extracting tar blob: $(basename "$BLOB")"
+                        echo "  [${EXTRACTED_COUNT}] Extracting tar blob: $(basename "$BLOB")"
                         tar -xf "$BLOB" -C "${ROOTFS}" 2>/dev/null || {
-                            gunzip -c "$BLOB" 2>/dev/null | tar -xf - -C "${ROOTFS}" 2>/dev/null || true
+                            # Try gzip decompression
+                            gunzip -c "$BLOB" 2>/dev/null | tar -xf - -C "${ROOTFS}" 2>/dev/null || {
+                                # Try with different compression
+                                zcat "$BLOB" 2>/dev/null | tar -xf - -C "${ROOTFS}" 2>/dev/null || true
+                            }
                         }
+                        EXTRACTED_COUNT=$((EXTRACTED_COUNT + 1))
                     fi
                 fi
             done
+            
+            if [ $EXTRACTED_COUNT -eq 0 ]; then
+                echo "⚠️  No tar archives found by file type detection"
+                echo "   Trying to extract all blobs as tar files..."
+                # Last resort: try extracting all blobs
+                for BLOB in "${BLOBS_DIR}"/*; do
+                    if [ -f "$BLOB" ] && [ -s "$BLOB" ]; then
+                        # Skip very small files (likely configs)
+                        BLOB_SIZE=$(stat -f%z "$BLOB" 2>/dev/null || stat -c%s "$BLOB" 2>/dev/null || echo "0")
+                        if [ "$BLOB_SIZE" -gt 1000 ]; then
+                            echo "  Trying blob: $(basename "$BLOB") (${BLOB_SIZE} bytes)"
+                            tar -xf "$BLOB" -C "${ROOTFS}" 2>/dev/null || {
+                                gunzip -c "$BLOB" 2>/dev/null | tar -xf - -C "${ROOTFS}" 2>/dev/null || {
+                                    zcat "$BLOB" 2>/dev/null | tar -xf - -C "${ROOTFS}" 2>/dev/null || true
+                                }
+                            }
+                            # Check if we got something useful
+                            if [ -d "${ROOTFS}/opt" ] || [ -d "${ROOTFS}/usr" ]; then
+                                echo "  ✓ Found filesystem structure!"
+                                break
+                            fi
+                        fi
+                    fi
+                done
+            else
+                echo "  ✓ Extracted ${EXTRACTED_COUNT} layer(s)"
+            fi
+        else
+            echo "❌ Could not find blobs directory"
         fi
     fi
 fi
