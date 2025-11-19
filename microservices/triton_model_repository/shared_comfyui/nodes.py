@@ -2148,8 +2148,12 @@ async def load_custom_node(module_path: str, ignore=set(), module_parent="custom
                     EXTENSION_WEB_DIRS[project_name] = web_dir_path
 
                     logging.info("Automatically register web folder {} for {}".format(web_dir_name, project_name))
+        except ImportError:
+            # Silently ignore - comfy_config is optional for microservices
+            pass
         except Exception as e:
-            logging.warning(f"Unable to parse pyproject.toml due to lack dependency pydantic-settings, please run 'pip install -r requirements.txt': {e}")
+            # Only log if it's not an ImportError (which we expect)
+            pass
 
         if hasattr(module, "WEB_DIRECTORY") and getattr(module, "WEB_DIRECTORY") is not None:
             web_dir = os.path.abspath(os.path.join(module_dir, getattr(module, "WEB_DIRECTORY")))
