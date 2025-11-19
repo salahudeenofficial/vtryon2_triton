@@ -36,16 +36,18 @@ else
     
     # Try multiple versions and package names
     # Triton release naming can vary: ubuntu2404, ubuntu22.04, ubuntu2004, etc.
-    VERSIONS_TO_TRY=("${TRITON_VERSION}" "2.47.0" "2.46.0" "2.45.0")
+    # Note: Ubuntu 24.04 may not have releases yet, so we try 22.04 packages which are compatible
+    VERSIONS_TO_TRY=("2.47.0" "2.46.0" "2.45.0" "2.44.0" "2.43.0")
     PACKAGE_NAMES=()
     
     # Build list of package names to try
+    # Ubuntu 24.04 can use 22.04 packages (they're usually compatible)
     if [[ "$UBUNTU_VERSION" == "24.04" ]]; then
-        PACKAGE_NAMES=("ubuntu2404" "ubuntu22.04" "ubuntu2004")
+        PACKAGE_NAMES=("ubuntu22.04" "ubuntu2204" "ubuntu2004" "ubuntu20.04")
     elif [[ "$UBUNTU_VERSION" == "22.04" ]]; then
-        PACKAGE_NAMES=("ubuntu2204" "ubuntu22.04" "ubuntu2004")
+        PACKAGE_NAMES=("ubuntu22.04" "ubuntu2204" "ubuntu2004" "ubuntu20.04")
     else
-        PACKAGE_NAMES=("ubuntu2004" "ubuntu22.04" "ubuntu2204")
+        PACKAGE_NAMES=("ubuntu2004" "ubuntu20.04" "ubuntu22.04" "ubuntu2204")
     fi
     
     DOWNLOAD_SUCCESS=false
