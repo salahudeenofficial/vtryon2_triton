@@ -142,17 +142,17 @@ nvidia-smi
 
 **⚠️ IMPORTANT: If your VastAI instance is a container** (like `vastai/base-image_cuda-13.0.1-cudnn-devel-ubuntu24.04-py313/jupyter`), **use one of these methods**:
 
-**Method 1: Extract from Docker Image using Podman (Recommended - No Docker daemon needed)**
+**Method 1: Install via PyTriton (Recommended - Simplest)**
 
 ```bash
 cd microservices
-chmod +x extract_from_docker_image.sh
-./extract_from_docker_image.sh
+chmod +x install_triton_via_pytriton.sh
+./install_triton_via_pytriton.sh
 ```
 
-This uses `podman` (works without Docker daemon) to pull the Docker image and extract the Triton binary.
+This installs `nvidia-pytriton` via pip, which includes Triton Inference Server binaries. Works on Ubuntu 24.04, no Docker/podman needed.
 
-**Method 2: Install via PyTriton (Alternative)**
+**Method 2: Extract from Docker Image using Podman (Alternative)**
 
 ```bash
 cd microservices
