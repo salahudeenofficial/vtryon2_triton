@@ -21,8 +21,54 @@ from service import encode_text_and_images
 from config import Config
 
 def cleanup_gpu_memory():
-    """Force cleanup of GPU memory by clearing caches and running garbage collection"""
+    """Force cleanup of GPU memory by clearing caches, unloading ComfyUI models, and running garbage collection"""
     if torch.cuda.is_available():
+        # Try to unload ComfyUI models if model_management is available
+        try:
+            import sys
+            # Check if ComfyUI is in sys.path
+            comfyui_path = None
+            for path in sys.path:
+                if 'comfy' in path.lower() or 'ComfyUI' in path:
+                    comfyui_path = path
+                    break
+            
+            if comfyui_path:
+                try:
+                    from comfy import model_management
+                    # Force unload all models
+                    if hasattr(model_management, 'current_loaded_models'):
+                        # Mark all models as not currently used
+                        for loaded_model in model_management.current_loaded_models[:]:
+                            if hasattr(loaded_model, 'currently_used'):
+                                loaded_model.currently_used = False
+                            if hasattr(loaded_model, 'model_unload'):
+                                try:
+                                    loaded_model.model_unload()
+                                except:
+                                    pass
+                        # Clear the list
+                        model_management.current_loaded_models.clear()
+                    
+                    # Call free_memory to force cleanup
+                    if hasattr(model_management, 'free_memory'):
+                        try:
+                            model_management.free_memory(0, device=torch.device('cuda'))
+                        except:
+                            pass
+                    
+                    # Call cleanup_models_gc if available
+                    if hasattr(model_management, 'cleanup_models_gc'):
+                        try:
+                            model_management.cleanup_models_gc()
+                        except:
+                            pass
+                except ImportError:
+                    pass
+        except Exception as e:
+            # Silently fail if ComfyUI model management is not available
+            pass
+        
         # Clear all CUDA caches
         torch.cuda.empty_cache()
         torch.cuda.ipc_collect()
@@ -510,7 +556,12 @@ def main():
     # Clean up between tests to prevent OOM
     print("\n🧹 Cleaning up GPU memory between tests...")
     cleanup_gpu_memory()
-    time.sleep(1)  # Give GPU time to free memory
+    time.sleep(2)  # Give GPU time to free memory
+    
+    # Check memory before second test
+    if torch.cuda.is_available():
+        mem_after_cleanup = get_gpu_memory()
+        print(f"   GPU memory after cleanup: {mem_after_cleanup:.1f} MB")
     
     test_results['resource_profiling'] = test_resource_usage()
     
