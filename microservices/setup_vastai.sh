@@ -113,6 +113,10 @@ if [ ! -d "$SHARED_COMFYUI/comfy" ]; then
         "new_updater.py"
     )
     
+    # Create custom_nodes directory (empty, we don't load custom nodes in microservices)
+    mkdir -p "$SHARED_COMFYUI/custom_nodes"
+    touch "$SHARED_COMFYUI/custom_nodes/.gitkeep"
+    
     for file in "${CORE_FILES[@]}"; do
         if [ -f "${PROJECT_ROOT}/${file}" ]; then
             cp "${PROJECT_ROOT}/${file}" "$SHARED_COMFYUI/" 2>/dev/null && echo "✓ Copied ${file}" || echo "⚠️  Failed to copy ${file}"

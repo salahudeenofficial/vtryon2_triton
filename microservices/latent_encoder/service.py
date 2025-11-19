@@ -39,13 +39,14 @@ def import_custom_nodes_minimal() -> None:
     """
     Minimal custom node loading using asyncio.run() without server infrastructure.
     This is lighter than the full server setup but still requires async execution.
+    For microservices, we only need built-in extra nodes, not custom nodes.
     """
     import asyncio
     from nodes import init_extra_nodes
     
-    # Simply run the async function with asyncio.run() - no server needed
-    # This creates a new event loop, runs the coroutine, and closes the loop
-    asyncio.run(init_extra_nodes(init_custom_nodes=True, init_api_nodes=False))
+    # Only load built-in extra nodes, skip custom nodes to avoid import errors
+    # Custom nodes often require server.py and other dependencies we don't need
+    asyncio.run(init_extra_nodes(init_custom_nodes=False, init_api_nodes=False))
 
 
 def setup_comfyui() -> None:
