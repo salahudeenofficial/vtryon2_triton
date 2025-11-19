@@ -15,6 +15,25 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
+# Copy requirements files first (for better Docker layer caching)
+COPY latent_encoder/requirements.txt /tmp/latent_encoder_requirements.txt
+COPY text_encoder/requirements.txt /tmp/text_encoder_requirements.txt
+COPY sampling/requirements.txt /tmp/sampling_requirements.txt
+COPY decoding/requirements.txt /tmp/decoding_requirements.txt
+
+# Install Python dependencies
+# Note: Triton base image may have some packages, but we ensure all are present
+# Core ML packages
+RUN pip3 install --no-cache-dir \
+    torch>=2.0.0 \
+    torchvision>=0.15.0 \
+    numpy>=1.24.0 \
+    Pillow>=9.0.0 \
+    && pip3 install --no-cache-dir \
+    python-dotenv>=1.0.0 \
+    pydantic>=2.0.0 \
+    && rm -rf /tmp/*_requirements.txt /root/.cache/pip
+
 # Copy model repository structure (code only, no large model files)
 # This includes:
 # - All config.pbtxt files
