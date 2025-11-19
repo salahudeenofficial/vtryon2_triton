@@ -337,7 +337,8 @@ def test_resource_usage():
     # Run inference
     test_image1 = "test_data/images/person.jpg"
     test_image2 = "test_data/images/cloth.jpg"
-    test_prompt = "将图片 1 中的绿色遮罩区域仅用于判断服装属于上半身或下半身，不要将服装限制在遮罩范围内。\n\n将图片 2 中的服装自然地穿戴到图片 1 中的人物身上，保持图片 2 中服装的完整形状、袖长和轮廓。无论图片 2 是单独的服装图还是人物穿着该服装的图，都应准确地转移服装，同时保留其原始面料质感、材质细节和颜色准确性。\n\n确保图片 1 中人物的面部、头发和皮肤完全保持不变。光照与阴影应自然匹配图片 1 的环境，但服装的材质外观必须忠实于图片 2。\n\n保持边缘平滑融合、阴影逼真，整体效果自然且不改变人物的身份特征。"
+    # Use the same prompt as workflow_script_serial_test.py to match expected outputs
+    test_prompt = "by using the green masked area from Picture 3 as a reference for position place the garment from Picture 2 on the person from Picture 1."
     
     if os.path.exists(test_image1) and os.path.exists(test_image2):
         # Monitor resources during inference
