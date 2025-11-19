@@ -36,15 +36,39 @@ echo "Pulling: ${TRITON_IMAGE}"
 echo "This may take a few minutes..."
 echo ""
 
-podman pull "${TRITON_IMAGE}" || {
-    echo "❌ Failed to pull image"
+# Try podman with different options to handle permission issues
+PODMAN_PULL_SUCCESS=false
+
+# Try 1: Standard pull
+if podman pull "${TRITON_IMAGE}" 2>/dev/null; then
+    PODMAN_PULL_SUCCESS=true
+# Try 2: With docker:// prefix
+elif podman pull "docker://${TRITON_IMAGE}" 2>/dev/null; then
+    TRITON_IMAGE="docker://${TRITON_IMAGE}"
+    PODMAN_PULL_SUCCESS=true
+# Try 3: With rootless configuration
+elif podman --root="${HOME}/.local/share/containers/storage" pull "${TRITON_IMAGE}" 2>/dev/null; then
+    PODMAN_PULL_SUCCESS=true
+# Try 4: Use sudo (if available)
+elif sudo podman pull "${TRITON_IMAGE}" 2>/dev/null; then
+    PODMAN_PULL_SUCCESS=true
+fi
+
+if [ "$PODMAN_PULL_SUCCESS" = false ]; then
+    echo "❌ Failed to pull image with podman"
     echo ""
-    echo "Troubleshooting:"
-    echo "  1. Check internet connection"
-    echo "  2. Try: podman pull docker://${TRITON_IMAGE}"
-    echo "  3. Or use PyTriton method: ./install_triton_via_pytriton.sh"
+    echo "=========================================="
+    echo "Alternative: Use PyTriton (Simpler)"
+    echo "=========================================="
+    echo ""
+    echo "Since podman has permission issues, use PyTriton instead:"
+    echo ""
+    echo "  ./install_triton_via_pytriton.sh"
+    echo ""
+    echo "This installs Triton via pip and is much simpler."
+    echo ""
     exit 1
-}
+fi
 
 echo "✓ Image pulled successfully"
 echo ""
@@ -53,39 +77,85 @@ echo "=========================================="
 echo "Step 2: Extracting Triton Files"
 echo "=========================================="
 
-# Create temporary container
-CONTAINER_ID=$(podman create "${TRITON_IMAGE}" /bin/true)
+# Create temporary container (try with sudo if needed)
+CONTAINER_ID=""
+if podman create "${TRITON_IMAGE}" /bin/true 2>/dev/null; then
+    CONTAINER_ID=$(podman create "${TRITON_IMAGE}" /bin/true 2>&1 | tail -1 | grep -oE '[a-f0-9]{64}' | head -1)
+elif sudo podman create "${TRITON_IMAGE}" /bin/true 2>/dev/null; then
+    CONTAINER_ID=$(sudo podman create "${TRITON_IMAGE}" /bin/true 2>&1 | tail -1 | grep -oE '[a-f0-9]{64}' | head -1)
+    USE_SUDO="sudo"
+else
+    echo "❌ Could not create container"
+    exit 1
+fi
+
 echo "Created container: ${CONTAINER_ID}"
 
 # Create target directory
 mkdir -p "${TRITON_DIR}/bin"
 mkdir -p "${TRITON_DIR}/lib"
 
-# Extract tritonserver binary
-echo "Extracting tritonserver binary..."
-podman cp "${CONTAINER_ID}:/opt/tritonserver/bin/tritonserver" "${TRITON_DIR}/bin/tritonserver" || {
-    echo "⚠️  Binary extraction failed, trying alternative path..."
-    podman cp "${CONTAINER_ID}:/usr/bin/tritonserver" "${TRITON_DIR}/bin/tritonserver" || {
-        echo "❌ Could not find tritonserver binary in image"
-        podman rm "${CONTAINER_ID}"
-        exit 1
-    }
-}
+# Extract tritonserver binary (try with/without sudo)
+EXTRACT_SUCCESS=false
+if [ -n "$USE_SUDO" ]; then
+    if sudo podman cp "${CONTAINER_ID}:/opt/tritonserver/bin/tritonserver" "${TRITON_DIR}/bin/tritonserver" 2>/dev/null; then
+        EXTRACT_SUCCESS=true
+    elif sudo podman cp "${CONTAINER_ID}:/usr/bin/tritonserver" "${TRITON_DIR}/bin/tritonserver" 2>/dev/null; then
+        EXTRACT_SUCCESS=true
+    fi
+else
+    if podman cp "${CONTAINER_ID}:/opt/tritonserver/bin/tritonserver" "${TRITON_DIR}/bin/tritonserver" 2>/dev/null; then
+        EXTRACT_SUCCESS=true
+    elif podman cp "${CONTAINER_ID}:/usr/bin/tritonserver" "${TRITON_DIR}/bin/tritonserver" 2>/dev/null; then
+        EXTRACT_SUCCESS=true
+    fi
+fi
+
+if [ "$EXTRACT_SUCCESS" = false ]; then
+    echo "❌ Could not extract tritonserver binary"
+    if [ -n "$USE_SUDO" ]; then
+        sudo podman rm "${CONTAINER_ID}" 2>/dev/null
+    else
+        podman rm "${CONTAINER_ID}" 2>/dev/null
+    fi
+    echo ""
+    echo "Try PyTriton method instead:"
+    echo "  ./install_triton_via_pytriton.sh"
+    exit 1
+fi
+
+echo "✓ Binary extracted"
 
 # Extract libraries (optional but recommended)
 echo "Extracting libraries..."
-podman cp "${CONTAINER_ID}:/opt/tritonserver/lib" "${TRITON_DIR}/" 2>/dev/null || {
-    echo "⚠️  Could not extract libraries (may still work)"
-}
+if [ -n "$USE_SUDO" ]; then
+    sudo podman cp "${CONTAINER_ID}:/opt/tritonserver/lib" "${TRITON_DIR}/" 2>/dev/null || {
+        echo "⚠️  Could not extract libraries (may still work)"
+    }
+else
+    podman cp "${CONTAINER_ID}:/opt/tritonserver/lib" "${TRITON_DIR}/" 2>/dev/null || {
+        echo "⚠️  Could not extract libraries (may still work)"
+    }
+fi
 
 # Extract Python backend if present
 echo "Extracting Python backend..."
-podman cp "${CONTAINER_ID}:/opt/tritonserver/backends/python" "${TRITON_DIR}/backends/" 2>/dev/null || {
-    echo "⚠️  Python backend not found or already available"
-}
+if [ -n "$USE_SUDO" ]; then
+    sudo podman cp "${CONTAINER_ID}:/opt/tritonserver/backends/python" "${TRITON_DIR}/backends/" 2>/dev/null || {
+        echo "⚠️  Python backend not found or already available"
+    }
+else
+    podman cp "${CONTAINER_ID}:/opt/tritonserver/backends/python" "${TRITON_DIR}/backends/" 2>/dev/null || {
+        echo "⚠️  Python backend not found or already available"
+    }
+fi
 
 # Cleanup
-podman rm "${CONTAINER_ID}"
+if [ -n "$USE_SUDO" ]; then
+    sudo podman rm "${CONTAINER_ID}" 2>/dev/null
+else
+    podman rm "${CONTAINER_ID}" 2>/dev/null
+fi
 echo "✓ Container removed"
 
 # Make binary executable
