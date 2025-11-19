@@ -29,19 +29,39 @@ import comfy.model_management
 from comfy_api import feature_flags
 import node_helpers
 from comfyui_version import __version__
-from app.frontend_management import FrontendManager
-from comfy_api.internal import _ComfyNodeInternal
+# For microservices, these imports may not be available - make them optional
+try:
+    from app.frontend_management import FrontendManager
+    from comfy_api.internal import _ComfyNodeInternal
+    from app.user_manager import UserManager
+    from app.model_manager import ModelFileManager
+    from app.custom_node_manager import CustomNodeManager
+    from app.subgraph_manager import SubgraphManager
+    from api_server.routes.internal.internal_routes import InternalRoutes
+    from middleware.cache_middleware import cache_control
+except ImportError:
+    # Stub classes for microservices
+    class FrontendManager:
+        pass
+    class _ComfyNodeInternal:
+        pass
+    class UserManager:
+        pass
+    class ModelFileManager:
+        pass
+    class CustomNodeManager:
+        pass
+    class SubgraphManager:
+        pass
+    class InternalRoutes:
+        pass
+    def cache_control(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
 
-from app.user_manager import UserManager
-from app.model_manager import ModelFileManager
-from app.custom_node_manager import CustomNodeManager
-from app.subgraph_manager import SubgraphManager
 from typing import Optional, Union
-from api_server.routes.internal.internal_routes import InternalRoutes
 from protocol import BinaryEventTypes
-
-# Import cache control middleware
-from middleware.cache_middleware import cache_control
 
 async def send_socket_catch_exception(function, message):
     try:
