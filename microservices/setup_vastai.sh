@@ -105,6 +105,7 @@ if [ ! -d "$SHARED_COMFYUI/comfy" ]; then
     cp "${PROJECT_ROOT}/execution.py" "$SHARED_COMFYUI/" 2>/dev/null || echo "⚠️  execution.py not found"
     cp "${PROJECT_ROOT}/node_helpers.py" "$SHARED_COMFYUI/" 2>/dev/null || echo "⚠️  node_helpers.py not found"
     cp "${PROJECT_ROOT}/comfyui_version.py" "$SHARED_COMFYUI/" 2>/dev/null || echo "⚠️  comfyui_version.py not found"
+    cp "${PROJECT_ROOT}/protocol.py" "$SHARED_COMFYUI/" 2>/dev/null || echo "⚠️  protocol.py not found"
     
     echo "✓ ComfyUI modules copied"
 else
