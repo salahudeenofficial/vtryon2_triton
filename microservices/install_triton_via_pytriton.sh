@@ -247,6 +247,13 @@ if [ ! -d "$TRITON_REPO" ]; then
     exit 1
 fi
 
+# Set up library path for Triton
+TRITON_LIB_DIR="$(dirname "$(dirname "$TRITON_BIN")")/lib"
+if [ -d "$TRITON_LIB_DIR" ]; then
+    export LD_LIBRARY_PATH="${TRITON_LIB_DIR}:${LD_LIBRARY_PATH}"
+    echo "Set LD_LIBRARY_PATH: $TRITON_LIB_DIR"
+fi
+
 echo "Starting Triton server..."
 echo "Binary: $TRITON_BIN"
 echo "Model repository: $(pwd)/$TRITON_REPO"

@@ -257,9 +257,29 @@ fi
 # Extract libraries
 echo "Extracting libraries..."
 if [ -d "${ROOTFS}/opt/tritonserver/lib" ]; then
-    cp -r "${ROOTFS}/opt/tritonserver/lib" "${TRITON_DIR}/" 2>/dev/null || {
-        echo "⚠️  Could not extract libraries (may still work)"
+    echo "   Copying libraries from /opt/tritonserver/lib..."
+    cp -r "${ROOTFS}/opt/tritonserver/lib"/* "${TRITON_DIR}/lib/" 2>/dev/null || {
+        # If lib directory doesn't exist, create it and copy
+        mkdir -p "${TRITON_DIR}/lib"
+        cp -r "${ROOTFS}/opt/tritonserver/lib"/* "${TRITON_DIR}/lib/" 2>/dev/null || {
+            echo "⚠️  Could not copy libraries"
+        }
     }
+    echo "   ✓ Libraries extracted"
+else
+    echo "⚠️  /opt/tritonserver/lib not found"
+fi
+
+# Also check for libraries in /usr/lib or /lib
+if [ -d "${ROOTFS}/usr/lib" ]; then
+    echo "   Checking for additional libraries in /usr/lib..."
+    # Copy any triton-related libraries
+    find "${ROOTFS}/usr/lib" -name "*triton*" -o -name "*b64*" 2>/dev/null | while read LIB; do
+        if [ -f "$LIB" ]; then
+            mkdir -p "${TRITON_DIR}/lib"
+            cp "$LIB" "${TRITON_DIR}/lib/" 2>/dev/null || true
+        fi
+    done
 fi
 
 # Extract Python backend if present
@@ -269,6 +289,7 @@ if [ -d "${ROOTFS}/opt/tritonserver/backends/python" ]; then
     cp -r "${ROOTFS}/opt/tritonserver/backends/python" "${TRITON_DIR}/backends/" 2>/dev/null || {
         echo "⚠️  Python backend not found or already available"
     }
+    echo "   ✓ Python backend extracted"
 fi
 
 # Cleanup
@@ -287,13 +308,25 @@ if [ -f "${TRITON_DIR}/bin/tritonserver" ]; then
     echo ""
     echo "Triton binary: ${TRITON_DIR}/bin/tritonserver"
     echo ""
+    
+    # Set up library path for testing
+    export LD_LIBRARY_PATH="${TRITON_DIR}/lib:${LD_LIBRARY_PATH}"
+    
     echo "Testing binary..."
-    "${TRITON_DIR}/bin/tritonserver" --version || echo "  (version check skipped)"
+    if "${TRITON_DIR}/bin/tritonserver" --version 2>/dev/null; then
+        echo "  ✓ Binary works!"
+    else
+        echo "  ⚠️  Binary has library dependencies"
+        echo "     Make sure to set LD_LIBRARY_PATH when running:"
+        echo "     export LD_LIBRARY_PATH=${TRITON_DIR}/lib:\$LD_LIBRARY_PATH"
+    fi
     echo ""
     echo "✓ Ready to use!"
     echo ""
     echo "Start Triton with:"
     echo "  ./start_triton_direct.sh"
+    echo ""
+    echo "Note: The start script will set LD_LIBRARY_PATH automatically"
     echo ""
 else
     echo "❌ Extraction failed - binary not found"
