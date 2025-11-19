@@ -1,0 +1,52 @@
+name: "text_encoder"
+backend: "python"
+max_batch_size: 1
+
+input [
+  {
+    name: "image1"
+    data_type: TYPE_STRING
+    dims: [ 1 ]
+  }
+  {
+    name: "image2"
+    data_type: TYPE_STRING
+    dims: [ 1 ]
+  }
+  {
+    name: "prompt"
+    data_type: TYPE_STRING
+    dims: [ 1 ]
+  }
+]
+
+output [
+  {
+    name: "positive_encoding"
+    data_type: TYPE_FP32
+    dims: [-1, 437, 3584]
+  }
+  {
+    name: "negative_encoding"
+    data_type: TYPE_FP32
+    dims: [-1, 407, 3584]
+  }
+]
+
+instance_group [
+  {
+    count: 1
+    kind: KIND_GPU
+  }
+]
+
+parameters [
+  {
+    key: "MODEL_DIR"
+    value: { string_value: "${TRITON_MODEL_REPOSITORY}/shared_models" }
+  },
+  {
+    key: "COMFYUI_PATH"
+    value: { string_value: "${TRITON_MODEL_REPOSITORY}/shared_comfyui" }
+  }
+]

@@ -1,0 +1,37 @@
+name: "decoding"
+backend: "python"
+max_batch_size: 1
+
+input [
+  {
+    name: "latent"
+    data_type: TYPE_STRING
+    dims: [ 1 ]
+  }
+]
+
+output [
+  {
+    name: "image"
+    data_type: TYPE_FP32
+    dims: [-1, 1176, 880, 3]
+  }
+]
+
+instance_group [
+  {
+    count: 1
+    kind: KIND_GPU
+  }
+]
+
+parameters [
+  {
+    key: "MODEL_DIR"
+    value: { string_value: "${TRITON_MODEL_REPOSITORY}/shared_models" }
+  },
+  {
+    key: "COMFYUI_PATH"
+    value: { string_value: "${TRITON_MODEL_REPOSITORY}/shared_comfyui" }
+  }
+]

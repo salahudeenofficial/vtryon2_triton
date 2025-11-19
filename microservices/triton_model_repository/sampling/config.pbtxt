@@ -1,0 +1,62 @@
+name: "sampling"
+backend: "python"
+max_batch_size: 1
+
+input [
+  {
+    name: "positive_encoding"
+    data_type: TYPE_STRING
+    dims: [ 1 ]
+  }
+  {
+    name: "negative_encoding"
+    data_type: TYPE_STRING
+    dims: [ 1 ]
+  }
+  {
+    name: "latent_image"
+    data_type: TYPE_STRING
+    dims: [ 1 ]
+  }
+  {
+    name: "seed"
+    data_type: TYPE_FP32
+    dims: [ 1 ]
+  }
+  {
+    name: "steps"
+    data_type: TYPE_FP32
+    dims: [ 1 ]
+  }
+  {
+    name: "cfg"
+    data_type: TYPE_FP32
+    dims: [ 1 ]
+  }
+]
+
+output [
+  {
+    name: "sampled_latent"
+    data_type: TYPE_FP32
+    dims: [-1, 16, 1, 147, 110]
+  }
+]
+
+instance_group [
+  {
+    count: 1
+    kind: KIND_GPU
+  }
+]
+
+parameters [
+  {
+    key: "MODEL_DIR"
+    value: { string_value: "${TRITON_MODEL_REPOSITORY}/shared_models" }
+  },
+  {
+    key: "COMFYUI_PATH"
+    value: { string_value: "${TRITON_MODEL_REPOSITORY}/shared_comfyui" }
+  }
+]
