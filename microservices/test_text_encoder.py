@@ -13,71 +13,11 @@ from pathlib import Path
 import subprocess
 import psutil
 import threading
-import gc
 
 sys.path.insert(0, str(Path(__file__).parent / "text_encoder"))
 
 from service import encode_text_and_images
 from config import Config
-
-def cleanup_gpu_memory():
-    """Force cleanup of GPU memory by clearing caches, unloading ComfyUI models, and running garbage collection"""
-    if torch.cuda.is_available():
-        # Try to unload ComfyUI models if model_management is available
-        try:
-            import sys
-            # Check if ComfyUI is in sys.path
-            comfyui_path = None
-            for path in sys.path:
-                if 'comfy' in path.lower() or 'ComfyUI' in path:
-                    comfyui_path = path
-                    break
-            
-            if comfyui_path:
-                try:
-                    from comfy import model_management
-                    # Force unload all models
-                    if hasattr(model_management, 'current_loaded_models'):
-                        # Mark all models as not currently used
-                        for loaded_model in model_management.current_loaded_models[:]:
-                            if hasattr(loaded_model, 'currently_used'):
-                                loaded_model.currently_used = False
-                            if hasattr(loaded_model, 'model_unload'):
-                                try:
-                                    loaded_model.model_unload()
-                                except:
-                                    pass
-                        # Clear the list
-                        model_management.current_loaded_models.clear()
-                    
-                    # Call free_memory to force cleanup
-                    if hasattr(model_management, 'free_memory'):
-                        try:
-                            model_management.free_memory(0, device=torch.device('cuda'))
-                        except:
-                            pass
-                    
-                    # Call cleanup_models_gc if available
-                    if hasattr(model_management, 'cleanup_models_gc'):
-                        try:
-                            model_management.cleanup_models_gc()
-                        except:
-                            pass
-                except ImportError:
-                    pass
-        except Exception as e:
-            # Silently fail if ComfyUI model management is not available
-            pass
-        
-        # Clear all CUDA caches
-        torch.cuda.empty_cache()
-        torch.cuda.ipc_collect()
-        # Reset peak memory stats
-        torch.cuda.reset_peak_memory_stats()
-        # Run garbage collection to free Python objects
-        gc.collect()
-        # Clear cache again after GC
-        torch.cuda.empty_cache()
 
 def get_gpu_memory():
     """Get current GPU memory usage in MB"""
@@ -223,9 +163,6 @@ def test_basic_functionality():
     print("Test 1: Basic Functionality - Text Encoder")
     print("=" * 60)
     
-    # Clean up before starting test to ensure clean state
-    cleanup_gpu_memory()
-    
     test_image1 = "test_data/images/person.jpg"
     test_image2 = "test_data/images/cloth.jpg"
     test_prompt = "将图片 1 中的绿色遮罩区域仅用于判断服装属于上半身或下半身，不要将服装限制在遮罩范围内。\n\n将图片 2 中的服装自然地穿戴到图片 1 中的人物身上，保持图片 2 中服装的完整形状、袖长和轮廓。无论图片 2 是单独的服装图还是人物穿着该服装的图，都应准确地转移服装，同时保留其原始面料质感、材质细节和颜色准确性。\n\n确保图片 1 中人物的面部、头发和皮肤完全保持不变。光照与阴影应自然匹配图片 1 的环境，但服装的材质外观必须忠实于图片 2。\n\n保持边缘平滑融合、阴影逼真，整体效果自然且不改变人物的身份特征。"
@@ -349,9 +286,6 @@ def test_basic_functionality():
         print(f"✗ Exception: {e}")
         import traceback
         traceback.print_exc()
-    finally:
-        # Clean up GPU memory after test
-        cleanup_gpu_memory()
     
     return results
 
@@ -360,10 +294,6 @@ def test_resource_usage():
     print("\n" + "=" * 60)
     print("Test 2: Resource Profiling")
     print("=" * 60)
-    
-    # Clean up before starting test to ensure clean state
-    cleanup_gpu_memory()
-    time.sleep(1)  # Give GPU time to free memory
     
     results = {
         "test_name": "resource_profiling"
@@ -542,10 +472,23 @@ def test_resource_usage():
         results['gpu_memory'] = {"used_mb": "TBD"}
         results['cpu_usage'] = {"peak_percent": "TBD"}
     
-    # Clean up GPU memory after test
-    cleanup_gpu_memory()
-    
     return results
+
+def cleanup_gpu_memory():
+    """Clean up GPU memory by unloading all models"""
+    print("\n🧹 Cleaning up GPU memory before tests...")
+    try:
+        import comfy.model_management as model_management
+        model_management.unload_all_models()
+        model_management.cleanup_models_gc()
+    except (ImportError, AttributeError):
+        pass
+    
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        memory_after = get_gpu_memory()
+        print(f"   GPU memory after cleanup: {memory_after:.1f} MB")
 
 def main():
     """Run all tests and generate TRITON_CONFIG_DATA.json"""
@@ -554,26 +497,16 @@ def main():
     print("=" * 60)
     print()
     
-    # Initial cleanup to start with clean GPU memory
+    # Clean up GPU memory before running tests
     cleanup_gpu_memory()
     
     test_results = {}
     test_results['basic_functionality'] = test_basic_functionality()
     
-    # Clean up between tests to prevent OOM
-    print("\n🧹 Cleaning up GPU memory between tests...")
+    # Clean up between tests
     cleanup_gpu_memory()
-    time.sleep(2)  # Give GPU time to free memory
-    
-    # Check memory before second test
-    if torch.cuda.is_available():
-        mem_after_cleanup = get_gpu_memory()
-        print(f"   GPU memory after cleanup: {mem_after_cleanup:.1f} MB")
     
     test_results['resource_profiling'] = test_resource_usage()
-    
-    # Final cleanup
-    cleanup_gpu_memory()
     
     # Compile config data
     config_data = {
