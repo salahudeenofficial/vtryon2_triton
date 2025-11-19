@@ -35,6 +35,9 @@ add_extra_model_paths = _text_encoder_utils.add_extra_model_paths
 generate_request_id = _text_encoder_utils.generate_request_id
 ensure_directory_exists = _text_encoder_utils.ensure_directory_exists
 
+# Global flag to track ComfyUI initialization
+_comfyui_initialized = False
+
 
 def import_custom_nodes_minimal() -> None:
     """
@@ -50,7 +53,13 @@ def import_custom_nodes_minimal() -> None:
 
 
 def setup_comfyui() -> None:
-    """Setup ComfyUI paths and initialize."""
+    """Setup ComfyUI paths and initialize. Only runs once per process."""
+    global _comfyui_initialized
+    
+    # If already initialized, skip
+    if _comfyui_initialized:
+        return
+    
     microservice_dir = Path(__file__).parent
     
     # Try multiple ComfyUI locations (for different deployment scenarios)
@@ -137,8 +146,11 @@ def setup_comfyui() -> None:
             if model_path.exists():
                 folder_paths.add_model_folder_path(model_type, str(model_path), is_default=False)
     
-    # Import custom nodes
+    # Import custom nodes (only once)
     import_custom_nodes_minimal()
+    
+    # Mark as initialized
+    _comfyui_initialized = True
     
     print("ComfyUI initialized successfully")
 
