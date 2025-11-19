@@ -301,19 +301,42 @@ def encode_text_and_images(
         from nodes import CLIPLoader, VAELoader, LoadImage
         from nodes import NODE_CLASS_MAPPINGS
         
-        # Load CLIP model
-        clip_model_path = Config.get_clip_model_path()
-        if not clip_model_path.exists():
-            raise CLIPModelNotFoundError(f"CLIP model not found: {clip_model_path}")
+        # Resolve model paths - use folder_paths to find models (already configured in setup_comfyui)
+        import folder_paths
+        
+        # Get CLIP model path from folder_paths (will use the paths we configured)
+        clip_paths = folder_paths.get_folder_paths("clip")
+        clip_model_path = None
+        for clip_dir in clip_paths:
+            potential_path = Path(clip_dir) / clip_model_name
+            if potential_path.exists():
+                clip_model_path = potential_path
+                break
+        
+        if clip_model_path is None:
+            # Fallback to Config path
+            clip_model_path = Config.get_clip_model_path()
+            if not clip_model_path.exists():
+                raise CLIPModelNotFoundError(f"CLIP model not found: {clip_model_name}. Searched in: {clip_paths}")
         
         cliploader = CLIPLoader()
         clip_output = cliploader.load_clip(clip_name=clip_model_name)
         clip = get_value_at_index(clip_output, 0)
         
-        # Load VAE model
-        vae_model_path = Config.get_vae_model_path()
-        if not vae_model_path.exists():
-            raise VAEModelNotFoundError(f"VAE model not found: {vae_model_path}")
+        # Get VAE model path from folder_paths
+        vae_paths = folder_paths.get_folder_paths("vae")
+        vae_model_path = None
+        for vae_dir in vae_paths:
+            potential_path = Path(vae_dir) / vae_model_name
+            if potential_path.exists():
+                vae_model_path = potential_path
+                break
+        
+        if vae_model_path is None:
+            # Fallback to Config path
+            vae_model_path = Config.get_vae_model_path()
+            if not vae_model_path.exists():
+                raise VAEModelNotFoundError(f"VAE model not found: {vae_model_name}. Searched in: {vae_paths}")
         
         vaeloader = VAELoader()
         vae_output = vaeloader.load_vae(vae_name=vae_model_name)
