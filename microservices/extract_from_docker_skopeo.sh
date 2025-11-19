@@ -147,6 +147,7 @@ else
                 echo "⚠️  No tar archives found by file type detection"
                 echo "   Trying to extract all blobs as tar files..."
                 # Last resort: try extracting all blobs
+                # Extract ALL layers, don't stop after finding filesystem structure
                 for BLOB in "${BLOBS_DIR}"/*; do
                     if [ -f "$BLOB" ] && [ -s "$BLOB" ]; then
                         # Skip very small files (likely configs)
@@ -158,14 +159,11 @@ else
                                     zcat "$BLOB" 2>/dev/null | tar -xf - -C "${ROOTFS}" 2>/dev/null || true
                                 }
                             }
-                            # Check if we got something useful
-                            if [ -d "${ROOTFS}/opt" ] || [ -d "${ROOTFS}/usr" ]; then
-                                echo "  ✓ Found filesystem structure!"
-                                break
-                            fi
+                            # Note: Don't break - extract ALL layers to build complete filesystem
                         fi
                     fi
                 done
+                echo "  ✓ Extracted all large blobs"
             else
                 echo "  ✓ Extracted ${EXTRACTED_COUNT} layer(s)"
             fi
