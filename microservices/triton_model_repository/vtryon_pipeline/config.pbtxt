@@ -1,0 +1,103 @@
+name: "vtryon_pipeline"
+platform: "ensemble"
+max_batch_size: 1
+
+input [
+  {
+    name: "image1"
+    data_type: TYPE_STRING
+    dims: [ 1 ]
+  },
+  {
+    name: "image2"
+    data_type: TYPE_STRING
+    dims: [ 1 ]
+  },
+  {
+    name: "prompt"
+    data_type: TYPE_STRING
+    dims: [ 1 ]
+  }
+]
+
+output [
+  {
+    name: "output_image"
+    data_type: TYPE_FP32
+    dims: [-1, 1176, 880, 3]
+  }
+]
+
+ensemble_scheduling {
+  step [
+    {
+      model_name: "latent_encoder"
+      model_version: -1
+      input_map {
+        key: "input_image"
+        value: "image1"
+      }
+      output_map {
+        key: "latent"
+        value: "latent_image"
+      }
+    },
+    {
+      model_name: "text_encoder"
+      model_version: -1
+      input_map {
+        key: "image1"
+        value: "image1"
+      }
+      input_map {
+        key: "image2"
+        value: "image2"
+      }
+      input_map {
+        key: "prompt"
+        value: "prompt"
+      }
+      output_map {
+        key: "positive_encoding"
+        value: "positive_encoding"
+      }
+      output_map {
+        key: "negative_encoding"
+        value: "negative_encoding"
+      }
+    },
+    {
+      model_name: "sampling"
+      model_version: -1
+      input_map {
+        key: "positive_encoding"
+        value: "positive_encoding"
+      }
+      input_map {
+        key: "negative_encoding"
+        value: "negative_encoding"
+      }
+      input_map {
+        key: "latent_image"
+        value: "latent_image"
+      }
+      output_map {
+        key: "sampled_latent"
+        value: "sampled_latent"
+      }
+    },
+    {
+      model_name: "decoding"
+      model_version: -1
+      input_map {
+        key: "latent"
+        value: "sampled_latent"
+      }
+      output_map {
+        key: "image"
+        value: "output_image"
+      }
+    }
+  ]
+}
+
