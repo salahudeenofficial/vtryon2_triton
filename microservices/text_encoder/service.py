@@ -51,11 +51,35 @@ def import_custom_nodes_minimal() -> None:
 
 def setup_comfyui() -> None:
     """Setup ComfyUI paths and initialize."""
-    comfyui_path = Path(__file__).parent / "comfyui"
     microservice_dir = Path(__file__).parent
     
-    if not comfyui_path.exists():
-        raise ComfyUIInitializationError(f"ComfyUI directory not found: {comfyui_path}")
+    # Try multiple ComfyUI locations (for different deployment scenarios)
+    # 1. Shared ComfyUI in triton_model_repository (VastAI/Phase 2 testing)
+    # 2. Local comfyui directory (development)
+    # 3. Parent directory ComfyUI (if running from project root)
+    
+    comfyui_path = None
+    potential_paths = [
+        # Shared ComfyUI in microservices/triton_model_repository (VastAI/Phase 2)
+        microservice_dir.parent / "triton_model_repository" / "shared_comfyui",
+        # Shared ComfyUI in project root triton_model_repository (alternative)
+        microservice_dir.parent.parent / "triton_model_repository" / "shared_comfyui",
+        # Local comfyui (development)
+        microservice_dir / "comfyui",
+        # Parent ComfyUI (project root)
+        microservice_dir.parent.parent / "ComfyUI",
+        microservice_dir.parent.parent / "comfyui",
+    ]
+    
+    for path in potential_paths:
+        if path.exists() and (path / "comfy").exists():
+            comfyui_path = path
+            break
+    
+    if comfyui_path is None:
+        raise ComfyUIInitializationError(
+            f"ComfyUI directory not found. Tried: {[str(p) for p in potential_paths]}"
+        )
     
     # Add ComfyUI to sys.path
     add_comfyui_directory_to_sys_path(comfyui_path)
@@ -63,31 +87,53 @@ def setup_comfyui() -> None:
     # Add extra model paths
     add_extra_model_paths(comfyui_path)
     
-    # Configure folder_paths to use microservice's models directory
+    # Configure folder_paths to use models directory
     # This must be done after ComfyUI is added to sys.path
     import folder_paths
     
-    # Get microservice models directory (absolute path)
-    microservice_models_dir = (microservice_dir / Config.model_dir).resolve()
+    # Try multiple model directory locations (for different deployment scenarios)
+    # 1. Shared models in triton_model_repository (VastAI/Phase 2 testing)
+    # 2. Local models directory (development)
     
-    # Add microservice models directory to folder_paths
-    # This adds it as an additional search path (not replacing the default)
-    if microservice_models_dir.exists():
+    models_dir = None
+    potential_model_dirs = [
+        # Shared models in microservices/triton_model_repository (VastAI/Phase 2)
+        microservice_dir.parent / "triton_model_repository" / "shared_models",
+        # Shared models in project root triton_model_repository (alternative)
+        microservice_dir.parent.parent / "triton_model_repository" / "shared_models",
+        # Local models directory (development)
+        (microservice_dir / Config.model_dir).resolve(),
+    ]
+    
+    for model_dir_path in potential_model_dirs:
+        if model_dir_path.exists():
+            models_dir = model_dir_path
+            break
+    
+    if models_dir is None:
+        # Try to use Config.model_dir as fallback
+        models_dir = (microservice_dir / Config.model_dir).resolve()
+        if not models_dir.exists():
+            print(f"⚠️  Warning: Model directory not found: {models_dir}")
+            print(f"   Tried: {[str(p) for p in potential_model_dirs]}")
+    
+    # Add model paths to folder_paths
+    if models_dir and models_dir.exists():
         # Add CLIP path
-        clip_path = microservice_models_dir / "clip"
+        clip_path = models_dir / "clip"
         if clip_path.exists():
             folder_paths.add_model_folder_path("clip", str(clip_path), is_default=True)
             print(f"Added CLIP model path: {clip_path}")
         
         # Add VAE path
-        vae_path = microservice_models_dir / "vae"
+        vae_path = models_dir / "vae"
         if vae_path.exists():
             folder_paths.add_model_folder_path("vae", str(vae_path), is_default=True)
             print(f"Added VAE model path: {vae_path}")
         
         # Add other model paths if they exist
         for model_type in ["checkpoints", "loras", "text_encoders", "diffusion_models"]:
-            model_path = microservice_models_dir / model_type
+            model_path = models_dir / model_type
             if model_path.exists():
                 folder_paths.add_model_folder_path(model_type, str(model_path), is_default=False)
     
