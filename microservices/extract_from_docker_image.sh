@@ -52,6 +52,10 @@ elif podman --root="${HOME}/.local/share/containers/storage" pull "${TRITON_IMAG
 # Try 4: Use sudo (if available)
 elif sudo podman pull "${TRITON_IMAGE}" 2>/dev/null; then
     PODMAN_PULL_SUCCESS=true
+    USE_SUDO="sudo"
+# Try 5: Configure podman for rootless
+elif podman system migrate 2>/dev/null && podman pull "${TRITON_IMAGE}" 2>/dev/null; then
+    PODMAN_PULL_SUCCESS=true
 fi
 
 if [ "$PODMAN_PULL_SUCCESS" = false ]; then
