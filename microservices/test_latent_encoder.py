@@ -23,9 +23,14 @@ from config import Config
 def get_gpu_memory():
     """Get current GPU memory usage in MB"""
     try:
-        result = subprocess.run(['nvidia-smi', '--query-gpu=memory.used', '--format=csv,nounits,noheader'],
-                              capture_output=True, text=True)
-        return int(result.stdout.strip())
+        if torch.cuda.is_available():
+            # Use PyTorch to get GPU memory
+            return torch.cuda.memory_allocated() / (1024 * 1024)  # Convert to MB
+        else:
+            # Fallback to nvidia-smi
+            result = subprocess.run(['nvidia-smi', '--query-gpu=memory.used', '--format=csv,nounits,noheader'],
+                                  capture_output=True, text=True)
+            return int(result.stdout.strip())
     except:
         return 0
 
@@ -129,7 +134,12 @@ def test_resource_usage():
     }
     
     # Get initial GPU memory
-    initial_gpu_memory = get_gpu_memory()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()  # Clear cache before measurement
+        torch.cuda.reset_peak_memory_stats()  # Reset peak stats
+        initial_gpu_memory = get_gpu_memory()
+    else:
+        initial_gpu_memory = get_gpu_memory()
     
     # Get initial CPU usage
     process = psutil.Process()
@@ -138,29 +148,60 @@ def test_resource_usage():
     # Run inference
     test_image = "test_data/images/person.jpg"
     if os.path.exists(test_image):
+        # Monitor CPU during inference
+        cpu_samples = []
+        def monitor_cpu():
+            while True:
+                cpu_samples.append(process.cpu_percent(interval=0.1))
+                time.sleep(0.1)
+        
+        import threading
+        monitor_thread = threading.Thread(target=monitor_cpu, daemon=True)
+        monitor_thread.start()
+        
         start_time = time.time()
         result = encode_image_to_latent(image_path=test_image, save_tensor=False)
         inference_time = time.time() - start_time
         
+        # Stop monitoring
+        time.sleep(0.2)  # Let last sample complete
+        
         # Get peak GPU memory
-        peak_gpu_memory = get_gpu_memory()
-        peak_cpu = process.cpu_percent(interval=0.1)
+        if torch.cuda.is_available():
+            peak_gpu_memory_mb = torch.cuda.max_memory_allocated() / (1024 * 1024)  # Convert to MB
+            current_gpu_memory = get_gpu_memory()
+        else:
+            peak_gpu_memory_mb = get_gpu_memory()
+            current_gpu_memory = peak_gpu_memory_mb
+        
+        # Calculate average CPU usage
+        if cpu_samples:
+            avg_cpu = sum(cpu_samples) / len(cpu_samples)
+            max_cpu = max(cpu_samples)
+        else:
+            avg_cpu = process.cpu_percent(interval=0.1)
+            max_cpu = avg_cpu
         
         results['gpu_memory'] = {
             "initial_mb": initial_gpu_memory,
-            "peak_mb": peak_gpu_memory,
-            "used_mb": peak_gpu_memory - initial_gpu_memory
+            "peak_mb": peak_gpu_memory_mb,
+            "current_mb": current_gpu_memory,
+            "used_mb": peak_gpu_memory_mb - initial_gpu_memory
         }
         
         results['cpu_usage'] = {
             "initial_percent": initial_cpu,
-            "peak_percent": peak_cpu
+            "average_percent": avg_cpu,
+            "peak_percent": max_cpu
         }
         
         results['inference_time_seconds'] = inference_time
         
-        print(f"✓ GPU Memory: {results['gpu_memory']['used_mb']} MB")
-        print(f"✓ CPU Usage: {results['cpu_usage']['peak_percent']}%")
+        print(f"✓ GPU Memory - Initial: {initial_gpu_memory:.1f} MB")
+        print(f"✓ GPU Memory - Peak: {peak_gpu_memory_mb:.1f} MB")
+        print(f"✓ GPU Memory - Used: {results['gpu_memory']['used_mb']:.1f} MB")
+        print(f"✓ CPU Usage - Average: {avg_cpu:.1f}%")
+        print(f"✓ CPU Usage - Peak: {max_cpu:.1f}%")
         print(f"✓ Inference Time: {inference_time:.3f}s")
     else:
         results['note'] = "Test image not found - using placeholder values"
