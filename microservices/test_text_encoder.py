@@ -491,20 +491,18 @@ def cleanup_gpu_memory():
     """Clean up GPU memory by unloading all models"""
     print("\n🧹 Cleaning up GPU memory...")
     
-    # First, try to initialize ComfyUI if not already done, so we can use model_management
+    # First, try to use model_management if ComfyUI is already initialized
     try:
-        # Try to import and setup ComfyUI paths first
-        from pathlib import Path
-        import sys
-        
-        # Check if ComfyUI is already in sys.path
-        comfyui_found = False
-        for path in sys.path:
-            if 'comfyui' in path.lower() or 'comfy' in path.lower():
-                comfyui_found = True
-                break
-        
-        if not comfyui_found:
+        import comfy.model_management as model_management
+        model_management.unload_all_models()
+        model_management.cleanup_models_gc()
+        print("   ✓ Unloaded all ComfyUI models")
+    except (ImportError, AttributeError):
+        # ComfyUI not initialized yet, try to initialize it
+        try:
+            from pathlib import Path
+            import sys
+            
             # Try to find and add ComfyUI
             potential_paths = [
                 Path(__file__).parent / "triton_model_repository" / "shared_comfyui",
@@ -512,38 +510,37 @@ def cleanup_gpu_memory():
             ]
             for comfyui_path in potential_paths:
                 if comfyui_path.exists() and (comfyui_path / "comfy").exists():
-                    sys.path.insert(0, str(comfyui_path))
-                    break
-        
-        # Now try to use model_management
-        import comfy.model_management as model_management
-        model_management.unload_all_models()
-        model_management.cleanup_models_gc()
-        print("   ✓ Unloaded all ComfyUI models")
-    except (ImportError, AttributeError, Exception) as e:
-        print(f"   ⚠️  Could not unload ComfyUI models: {e}")
+                    if str(comfyui_path) not in sys.path:
+                        sys.path.insert(0, str(comfyui_path))
+                    try:
+                        import comfy.model_management as model_management
+                        model_management.unload_all_models()
+                        model_management.cleanup_models_gc()
+                        print("   ✓ Unloaded all ComfyUI models (after path setup)")
+                        break
+                    except:
+                        continue
+        except Exception as e:
+            print(f"   ⚠️  Could not unload ComfyUI models: {e}")
     
-    # Always clear CUDA cache
+    # Always clear CUDA cache and force garbage collection
     if torch.cuda.is_available():
+        import gc
+        gc.collect()
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
-        # Force garbage collection
-        import gc
         gc.collect()
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
         
         memory_after = get_gpu_memory()
-        print(f"   GPU memory after cleanup: {memory_after:.1f} MB")
+        allocated = torch.cuda.memory_allocated() / (1024 * 1024)
+        reserved = torch.cuda.memory_reserved() / (1024 * 1024)
         
-        # Check if there's still memory allocated (might be from another process)
-        try:
-            allocated = torch.cuda.memory_allocated() / (1024 * 1024)
-            reserved = torch.cuda.memory_reserved() / (1024 * 1024)
-            if allocated > 100 or reserved > 100:
-                print(f"   ⚠️  Warning: Still {allocated:.1f} MB allocated, {reserved:.1f} MB reserved")
-        except:
-            pass
+        print(f"   GPU memory after cleanup: {memory_after:.1f} MB")
+        if allocated > 100 or reserved > 100:
+            print(f"   ⚠️  Warning: PyTorch shows {allocated:.1f} MB allocated, {reserved:.1f} MB reserved")
+            print(f"   💡 If GPU is still full, there may be a zombie process. Check with: nvidia-smi")
 
 def main():
     """Run all tests and generate TRITON_CONFIG_DATA.json"""
