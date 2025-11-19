@@ -15,93 +15,124 @@
 2. ✅ Phase 2: Comprehensive service testing and information extraction
 3. ✅ Generated Triton config.pbtxt files from test results
 
-### Next: Phase 3 - Complete Repository Setup with Models
+### ⚠️ Important Change: Phases 3-8 on VastAI Only
+**Due to local resource constraints, Phases 3-8 will be executed entirely on VastAI instances.**
 
-## 🎯 Phase 3: Complete Repository Setup with Models
+### Next: Phase 3 - Complete Repository Setup with Models (VastAI)
 
-### Step 3.1: Setup Shared Models Directory
+## 🎯 Phase 3-8: All on VastAI Instance
 
-**Goal**: Download/copy models to shared location
+**All remaining phases will be executed on VastAI due to local resource constraints.**
 
-**Tasks**:
-1. Ensure models are in `triton_model_repository/shared_models/`:
-   - `vae/qwen_image_vae.safetensors`
-   - `clip/qwen_2.5_vl_7b_fp8_scaled.safetensors`
-   - `diffusion_models/qwen_image_edit_2509_fp8_e4m3fn.safetensors`
-   - `loras/Qwen-Image-Lightning-4steps-V2.0.safetensors`
+### Quick Start on VastAI
 
-2. Verify all model files exist:
+1. **SSH into VastAI instance**
    ```bash
-   cd microservices/triton_model_repository/shared_models
-   find . -name "*.safetensors" -type f
+   ssh root@<vastai-instance-ip>
    ```
 
-3. Document model paths in `triton_model_repository/MODEL_PATHS.md`
+2. **Clone repository**
+   ```bash
+   git clone https://github.com/salahudeenofficial/vtryon2_triton.git
+   cd vtryon2_triton
+   git checkout microservice
+   ```
 
-**Checkpoint**: ✅ All models accessible in shared_models directory
+3. **Run setup scripts**
+   ```bash
+   cd microservices
+   chmod +x setup_vastai.sh setup_triton_vastai.sh
+   ./setup_vastai.sh          # Downloads models, sets up environment
+   ./setup_triton_vastai.sh    # Prepares Triton repository
+   ```
 
----
-
-## 🎯 Phase 4: Python Backend Implementation
-
-### Step 4.1: Create Model Template
-
-**Goal**: Create base template for Python backend models
-
-**Create**: `triton_model_repository/_templates/model_template.py`
-
-**Template should include**:
-- TritonPythonModel class structure
-- Initialize method (setup ComfyUI, load models)
-- Execute method (process requests)
-- Finalize method (cleanup)
-- Error handling patterns
-- Logging setup
-
-### Step 4.2: Implement Individual Models
-
-**For each service** (latent_encoder, text_encoder, sampling, decoding):
-
-1. Copy service code to `triton_model_repository/{service}/1/`
-2. Create `model.py` based on template
-3. Implement:
-   - `initialize()`: Setup paths, load models
-   - `execute()`: Process Triton requests
-   - `finalize()`: Cleanup
-
-**Key Points**:
-- Use `pb_utils.get_model_dir()` for model directory
-- Access shared models via `../shared_models/`
-- Access shared ComfyUI via `../../shared_comfyui/`
-- Convert Triton tensors to/from service format
+4. **Activate environment**
+   ```bash
+   source ../venv/bin/activate
+   ```
 
 ---
 
-## 🎯 Phase 5: Local Triton Testing
+## 🎯 Phase 3: Complete Repository Setup (VastAI)
 
-### Step 5.1: Setup Local Triton Server
+**On VastAI instance:**
 
-```bash
-docker pull nvcr.io/nvidia/tritonserver:25.10-py3
-docker run --gpus=1 -p 8000:8000 -p 8001:8001 -p 8002:8002 \
-  -v $(pwd)/microservices/triton_model_repository:/models \
-  nvcr.io/nvidia/tritonserver:25.10-py3 \
-  tritonserver --model-repository=/models
-```
+1. Models will be downloaded by `setup_vastai.sh` to:
+   - `triton_model_repository/shared_models/vae/`
+   - `triton_model_repository/shared_models/clip/`
+   - `triton_model_repository/shared_models/diffusion_models/`
+   - `triton_model_repository/shared_models/loras/`
 
-### Step 5.2: Test Individual Models
+2. ComfyUI will be set up in:
+   - `triton_model_repository/shared_comfyui/`
 
-For each model:
-- Check status: `curl http://localhost:8000/v2/models/{model_name}`
-- Send test inference request
-- Verify output shape and data type
-- Compare with standalone test results
+3. Service code will be copied by `setup_triton_vastai.sh` to:
+   - `triton_model_repository/{service}/1/`
 
-### Step 5.3: Test Ensemble Model
+**Checkpoint**: ✅ Repository ready on VastAI
 
-- Create ensemble config
-- Test complete pipeline
-- Verify tensor flow between models
+---
+
+## 🎯 Phase 4: Python Backend Implementation (VastAI)
+
+**On VastAI instance:**
+
+1. Create model template: `triton_model_repository/_templates/model_template.py`
+2. Implement `model.py` for each service:
+   - `triton_model_repository/latent_encoder/1/model.py`
+   - `triton_model_repository/text_encoder/1/model.py`
+   - `triton_model_repository/sampling/1/model.py`
+   - `triton_model_repository/decoding/1/model.py`
+3. Create ensemble config: `triton_model_repository/vtryon_pipeline/config.pbtxt`
+
+**Checkpoint**: ✅ All Python backend models implemented
+
+---
+
+## 🎯 Phase 5: Triton Testing (VastAI)
+
+**On VastAI instance:**
+
+1. **Start Triton server**:
+   ```bash
+   cd microservices
+   ./start_triton.sh
+   ```
+
+2. **Test individual models** (in another terminal):
+   ```bash
+   curl http://localhost:8000/v2/models/latent_encoder
+   python test_triton_*.py
+   ```
+
+3. **Test ensemble model**
+4. **Performance testing with perf_analyzer**
+
+**Checkpoint**: ✅ All models tested and working
+
+---
+
+## 🎯 Phase 6: Docker Container (VastAI)
+
+**On VastAI instance:**
+
+1. Create `Dockerfile.triton`
+2. Build image: `docker build -t vtryon-triton:latest -f Dockerfile.triton .`
+3. Test container
+
+**Checkpoint**: ✅ Docker image ready
+
+---
+
+## 🎯 Phase 7: Final Testing & Documentation (VastAI)
+
+**On VastAI instance:**
+
+1. Complete all testing
+2. Document deployment process
+3. Create deployment results summary
+
+**Checkpoint**: ✅ Deployment complete
 
 ---
 
@@ -124,28 +155,33 @@ Each service has:
 
 ---
 
-## 🚀 Quick Start: Phase 3
+## 🚀 Quick Start: All on VastAI
 
-1. **Verify models exist**:
+### On VastAI Instance:
+
+1. **Clone and setup**:
    ```bash
-   cd microservices/triton_model_repository
-   ls -la shared_models/*/
+   git clone https://github.com/salahudeenofficial/vtryon2_triton.git
+   cd vtryon2_triton
+   git checkout microservice
+   cd microservices
+   ./setup_vastai.sh
+   ./setup_triton_vastai.sh
    ```
 
-2. **If models missing, copy from VastAI instance**:
+2. **Verify setup**:
    ```bash
-   # From VastAI instance
-   scp -r /workspace/vtryon2_triton/microservices/triton_model_repository/shared_models \
-         /home/fashionx/vtryon2/microservices/triton_model_repository/
+   # Check models
+   ls -lh triton_model_repository/shared_models/*/
+   
+   # Check ComfyUI
+   ls -la triton_model_repository/shared_comfyui/comfy
+   
+   # Check configs
+   ls -la triton_model_repository/*/config.pbtxt
    ```
 
-3. **Verify ComfyUI exists**:
-   ```bash
-   ls -la microservices/triton_model_repository/shared_comfyui/comfy
-   ```
-
-4. **Document model paths**:
-   Create `triton_model_repository/MODEL_PATHS.md` with all model locations
+3. **Start implementing Phase 4** (Python backend models)
 
 ---
 
@@ -159,15 +195,18 @@ Each service has:
 
 ---
 
-## 🔄 Next Actions
+## 🔄 Next Actions (All on VastAI)
 
-1. **Copy models to shared_models** (if not already done)
-2. **Create Python backend model template**
-3. **Implement model.py for each service**
-4. **Test with local Triton server**
-5. **Create ensemble config**
-6. **Prepare Docker image**
-7. **Deploy to VastAI**
+1. **SSH into VastAI instance**
+2. **Clone repository and run setup scripts**
+3. **Create Python backend model template**
+4. **Implement model.py for each service**
+5. **Test with Triton server on VastAI**
+6. **Create ensemble config**
+7. **Build Docker image on VastAI**
+8. **Complete testing and documentation on VastAI**
+
+**See**: `microservices/VASTAI_DEPLOYMENT_PLAN.md` for detailed instructions
 
 ---
 
