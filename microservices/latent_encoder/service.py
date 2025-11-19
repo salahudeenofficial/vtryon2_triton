@@ -215,10 +215,23 @@ def encode_image_to_latent(
         from nodes import VAELoader, LoadImage, VAEEncode
         from nodes import NODE_CLASS_MAPPINGS
         
-        # Load VAE model
-        vae_model_path = Config.get_vae_model_path()
-        if not vae_model_path.exists():
-            raise VAEModelNotFoundError(f"VAE model not found: {vae_model_path}")
+        # Resolve model paths - use folder_paths to find models (already configured in setup_comfyui)
+        import folder_paths
+        
+        # Get VAE model path from folder_paths
+        vae_paths = folder_paths.get_folder_paths("vae")
+        vae_model_path = None
+        for vae_dir in vae_paths:
+            potential_path = Path(vae_dir) / vae_model_name
+            if potential_path.exists():
+                vae_model_path = potential_path
+                break
+        
+        if vae_model_path is None:
+            # Fallback to Config path
+            vae_model_path = Config.get_vae_model_path()
+            if not vae_model_path.exists():
+                raise VAEModelNotFoundError(f"VAE model not found: {vae_model_name}. Searched in: {vae_paths}")
         
         vaeloader = VAELoader()
         vae_output = vaeloader.load_vae(vae_name=vae_model_name)

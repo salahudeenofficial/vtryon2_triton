@@ -295,10 +295,23 @@ def sample_latent(
         from nodes import UNETLoader, LoraLoaderModelOnly, KSampler
         from nodes import NODE_CLASS_MAPPINGS
         
-        # Load UNET model
-        unet_model_path = Config.get_unet_model_path()
-        if not unet_model_path.exists():
-            raise UNETModelNotFoundError(f"UNET model not found: {unet_model_path}")
+        # Resolve model paths - use folder_paths to find models (already configured in setup_comfyui)
+        import folder_paths
+        
+        # Get UNET model path from folder_paths
+        diffusion_model_paths = folder_paths.get_folder_paths("diffusion_models")
+        unet_model_path = None
+        for diffusion_dir in diffusion_model_paths:
+            potential_path = Path(diffusion_dir) / unet_model_name
+            if potential_path.exists():
+                unet_model_path = potential_path
+                break
+        
+        if unet_model_path is None:
+            # Fallback to Config path
+            unet_model_path = Config.get_unet_model_path()
+            if not unet_model_path.exists():
+                raise UNETModelNotFoundError(f"UNET model not found: {unet_model_name}. Searched in: {diffusion_model_paths}")
         
         unetloader = UNETLoader()
         unet_output = unetloader.load_unet(
@@ -307,10 +320,20 @@ def sample_latent(
         )
         unet_model = get_value_at_index(unet_output, 0)
         
-        # Load LoRA model and apply to UNET
-        lora_model_path = Config.get_lora_model_path()
-        if not lora_model_path.exists():
-            raise LoRAModelNotFoundError(f"LoRA model not found: {lora_model_path}")
+        # Get LoRA model path from folder_paths
+        lora_paths = folder_paths.get_folder_paths("loras")
+        lora_model_path = None
+        for lora_dir in lora_paths:
+            potential_path = Path(lora_dir) / lora_model_name
+            if potential_path.exists():
+                lora_model_path = potential_path
+                break
+        
+        if lora_model_path is None:
+            # Fallback to Config path
+            lora_model_path = Config.get_lora_model_path()
+            if not lora_model_path.exists():
+                raise LoRAModelNotFoundError(f"LoRA model not found: {lora_model_name}. Searched in: {lora_paths}")
         
         loraloadermodelonly = LoraLoaderModelOnly()
         lora_output = loraloadermodelonly.load_lora_model_only(

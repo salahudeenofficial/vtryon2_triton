@@ -10,18 +10,20 @@ load_dotenv()
 class Config:
     """Configuration class for sampling service."""
     
-    # Service mode: standalone or kafka
+    # Service mode: standalone (for testing before Triton integration)
     mode = os.getenv("MODE", "standalone")
     
-    # Kafka Configuration
-    kafka_bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
-    kafka_request_topic = os.getenv("KAFKA_REQUEST_TOPIC", "sampling-requests")
-    kafka_response_topic = os.getenv("KAFKA_RESPONSE_TOPIC", "sampling-responses")
-    kafka_consumer_group = os.getenv("KAFKA_CONSUMER_GROUP", "sampling-group")
-    kafka_schema_registry_url = os.getenv("KAFKA_SCHEMA_REGISTRY_URL", "http://localhost:8081")
-    
     # Model Configuration
-    model_dir = os.getenv("MODEL_DIR", "./models")
+    # Try shared models first (for VastAI/Phase 2), then fall back to local
+    _current_dir = Path(__file__).parent.resolve()
+    # Try microservices/triton_model_repository first, then project root
+    _shared_models = _current_dir.parent / "triton_model_repository" / "shared_models"
+    if not _shared_models.exists():
+        _shared_models = _current_dir.parent.parent / "triton_model_repository" / "shared_models"
+    if _shared_models.exists():
+        model_dir = os.getenv("MODEL_DIR", str(_shared_models))
+    else:
+        model_dir = os.getenv("MODEL_DIR", "./models")
     unet_model_name = os.getenv("UNET_MODEL_NAME", "qwen_image_edit_2509_fp8_e4m3fn.safetensors")
     lora_model_name = os.getenv("LORA_MODEL_NAME", "Qwen-Image-Lightning-4steps-V2.0.safetensors")
     lora_strength = float(os.getenv("LORA_STRENGTH", "1.0"))
@@ -32,16 +34,23 @@ class Config:
     # ComfyUI Configuration
     comfyui_path = os.getenv("COMFYUI_PATH", None)
     if comfyui_path is None:
-        # Try to find ComfyUI in parent directories
+        # Try to find ComfyUI in multiple locations
         current_dir = Path(__file__).parent.resolve()
-        comfyui_path = current_dir / "comfyui"
-        if not comfyui_path.exists():
-            # Look for ComfyUI in parent directories
-            parent = current_dir.parent.parent
-            for potential_path in [parent / "ComfyUI", parent / "comfyui"]:
-                if potential_path.exists():
-                    comfyui_path = potential_path
-                    break
+        potential_paths = [
+            # Shared ComfyUI in microservices/triton_model_repository (VastAI/Phase 2)
+            current_dir.parent / "triton_model_repository" / "shared_comfyui",
+            # Shared ComfyUI in project root triton_model_repository (alternative)
+            current_dir.parent.parent / "triton_model_repository" / "shared_comfyui",
+            # Local comfyui (development)
+            current_dir / "comfyui",
+            # Parent ComfyUI (project root)
+            current_dir.parent.parent / "ComfyUI",
+            current_dir.parent.parent / "comfyui",
+        ]
+        for potential_path in potential_paths:
+            if potential_path.exists() and (potential_path / "comfy").exists():
+                comfyui_path = potential_path
+                break
     
     # Sampling Parameters
     default_seed = os.getenv("DEFAULT_SEED", None)  # None means random
@@ -79,8 +88,8 @@ class Config:
     @classmethod
     def validate(cls) -> None:
         """Validate configuration."""
-        if cls.mode not in ["standalone", "kafka"]:
-            raise ValueError(f"Invalid mode: {cls.mode}. Must be 'standalone' or 'kafka'")
+        if cls.mode not in ["standalone"]:
+            raise ValueError(f"Invalid mode: {cls.mode}. Must be 'standalone'")
         
         if not Path(cls.model_dir).exists():
             raise ValueError(f"Model directory does not exist: {cls.model_dir}")
