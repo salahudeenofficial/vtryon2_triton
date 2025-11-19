@@ -12,8 +12,12 @@ echo ""
 MICROSERVICES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${MICROSERVICES_DIR}"
 
-# Try version 2.47.0 first (most recent stable)
+# Try version 2.47.0 first (most recent stable with server binary)
 echo "Attempting to download Triton 2.47.0 (Ubuntu 22.04 - compatible with 24.04)..."
+echo "Note: Version 2.62.0+ may only have client libraries, not server binary"
+echo "We need the server binary package (tritonserver-*-ubuntu*.tar.gz)"
+echo ""
+
 if wget -q --show-progress https://github.com/triton-inference-server/server/releases/download/v2.47.0/tritonserver-2.47.0-ubuntu22.04.tar.gz; then
     echo "✓ Download successful"
     tar -xzf tritonserver-2.47.0-ubuntu22.04.tar.gz

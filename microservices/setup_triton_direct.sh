@@ -35,9 +35,10 @@ else
     echo "Detected Ubuntu version: ${UBUNTU_VERSION}"
     
     # Try multiple versions and package names
-    # Triton release naming can vary: ubuntu2404, ubuntu22.04, ubuntu2004, etc.
-    # Note: Ubuntu 24.04 may not have releases yet, so we try 22.04 packages which are compatible
-    VERSIONS_TO_TRY=("2.47.0" "2.46.0" "2.45.0" "2.44.0" "2.43.0")
+    # NOTE: Newer releases (2.60+) may not have pre-built server binaries
+    # Use older stable releases that have full server packages
+    # Ubuntu 24.04 can use 22.04 packages (they're usually compatible)
+    VERSIONS_TO_TRY=("2.47.0" "2.46.0" "2.45.0" "2.44.0" "2.43.0" "2.42.0" "2.41.0")
     PACKAGE_NAMES=()
     
     # Build list of package names to try
