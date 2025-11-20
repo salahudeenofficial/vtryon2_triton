@@ -4,14 +4,3 @@
   "description": "Chinese virtual try-on prompt: Use green mask in image 1 only to determine if clothing is upper or lower body, don't restrict clothing to mask area. Naturally wear clothing from image 2 onto person in image 1, maintaining complete shape, sleeve length, and outline from image 2. Preserve original fabric texture, material details, and color accuracy. Keep person's face, hair, and skin completely unchanged. Lighting and shadows should naturally match image 1's environment, but clothing material appearance must be faithful to image 2. Maintain smooth edge blending, realistic shadows, natural overall effect without changing person's identity characteristics.",
   "usage": "This prompt will be used in the ensemble model when creating the vtryon_pipeline model.py file. The prompt is passed to the text_encoder service as a constant/default value."
 }
-
-  "text_encoder_positive_prompt": "将图片 1 中的绿色遮罩区域仅用于判断服装属于上半身或下半身，不要将服装限制在遮罩范围内。\n\n将图片 2 中的服装自然地穿戴到图片 1 中的人物身上，保持图片 2 中服装的完整形状、袖长和轮廓。无论图片 2 是单独的服装图还是人物穿着该服装的图，都应准确地转移服装，同时保留其原始面料质感、材质细节和颜色准确性。\n\n确保图片 1 中人物的面部、头发和皮肤完全保持不变。光照与阴影应自然匹配图片 1 的环境，但服装的材质外观必须忠实于图片 2。\n\n保持边缘平滑融合、阴影逼真，整体效果自然且不改变人物的身份特征。",
-  "text_encoder_negative_prompt": "",
-  "description": "Chinese virtual try-on prompt: Use green mask in image 1 only to determine if clothing is upper or lower body, don't restrict clothing to mask area. Naturally wear clothing from image 2 onto person in image 1, maintaining complete shape, sleeve length, and outline from image 2. Preserve original fabric texture, material details, and color accuracy. Keep person's face, hair, and skin completely unchanged. Lighting and shadows should naturally match image 1's environment, but clothing material appearance must be faithful to image 2. Maintain smooth edge blending, realistic shadows, natural overall effect without changing person's identity characteristics.",
-  "usage": "This prompt will be used in the ensemble model when creating the vtryon_pipeline model.py file. The prompt is passed to the text_encoder service as a constant/default value."
-}
-
-
-
-
-
