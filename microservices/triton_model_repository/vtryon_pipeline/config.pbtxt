@@ -17,6 +17,11 @@ input [
     name: "prompt"
     data_type: TYPE_STRING
     dims: [ -1 ]
+  },
+  {
+    name: "seed"
+    data_type: TYPE_INT64
+    dims: [ 1 ]
   }
 ]
 
@@ -78,6 +83,10 @@ ensemble_scheduling {
       input_map {
         key: "latent_image"
         value: "latent_encoded"
+      }
+      input_map {
+        key: "seed"
+        value: "seed"
       }
       output_map {
         key: "sampled_latent"
