@@ -18,7 +18,7 @@ input [
   },  {
     name: "seed"
     data_type: TYPE_INT64
-    dims: [ ]
+    dims: [ 1 ]
   }
 ]
 
@@ -28,6 +28,8 @@ output {
   dims: [ 16, 1, 147, 110 ]
 }
 
+# GPU configuration - all models run on GPU
+# Models are dynamically offloaded to CPU between ensemble steps via model.py
 instance_group [
   {
     count: 1

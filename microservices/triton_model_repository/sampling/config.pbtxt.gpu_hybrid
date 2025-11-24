@@ -1,0 +1,47 @@
+# Alternative configuration for hybrid CPU/GPU sampling
+# This config keeps the model on GPU, but you need to modify model.py
+# to manually offload non-UNet components to CPU and only run UNet on GPU
+name: "sampling"
+backend: "python"
+max_batch_size: 1
+
+input [
+  {
+    name: "positive_encoding"
+    data_type: TYPE_FP32
+    dims: [ 437, 3584 ]
+  },  {
+    name: "negative_encoding"
+    data_type: TYPE_FP32
+    dims: [ 407, 3584 ]
+  },  {
+    name: "latent_image"
+    data_type: TYPE_FP32
+    dims: [ 16, 1, 147, 110 ]
+  },  {
+    name: "seed"
+    data_type: TYPE_INT64
+    dims: [ 1 ]
+  }
+]
+
+output {
+  name: "sampled_latent"
+  data_type: TYPE_FP32
+  dims: [ 16, 1, 147, 110 ]
+}
+
+# GPU instance group - but model.py should handle CPU offloading for non-UNet components
+instance_group [
+  {
+    count: 1
+    kind: KIND_GPU
+  }
+]
+
+# Note: To achieve "UNet only on GPU" behavior, you need to modify
+# sampling/1/model.py to:
+# 1. Load UNet to GPU
+# 2. Keep other components (CLIP, VAE, etc.) on CPU
+# 3. Manually transfer tensors between CPU/GPU as needed
+

@@ -77,17 +77,28 @@ RUN rm -rf /tmp/*_requirements.txt /root/.cache/pip
 # - All config.pbtxt files
 # - All model.py files
 # - All service code
-# - ComfyUI modules
 # - Ensemble configuration
-COPY triton_model_repository/ /models/
+# NOTE: We copy only model directories, NOT shared_comfyui or shared_models
+# Those will be copied separately outside /models to avoid Triton trying to load them as models
+COPY triton_model_repository/latent_encoder /models/latent_encoder
+COPY triton_model_repository/text_encoder /models/text_encoder
+COPY triton_model_repository/sampling /models/sampling
+COPY triton_model_repository/decoding /models/decoding
+COPY triton_model_repository/vtryon_pipeline /models/vtryon_pipeline
 
-# Copy model download script and entrypoint
+# Copy shared resources OUTSIDE /models so Triton doesn't try to load them as models
+COPY triton_model_repository/shared_comfyui /workspace/shared_comfyui
+RUN mkdir -p /workspace/shared_models/{vae,clip,diffusion_models,loras}
+
+# Copy model download script, entrypoint, onstart script (for Vast AI), and monitoring script
 COPY download_triton_models.sh /workspace/download_triton_models.sh
 COPY entrypoint.sh /workspace/entrypoint.sh
-RUN chmod +x /workspace/download_triton_models.sh /workspace/entrypoint.sh
+COPY onstart.sh /workspace/onstart.sh
+COPY monitor_download.sh /workspace/monitor_download.sh
+RUN chmod +x /workspace/download_triton_models.sh /workspace/entrypoint.sh /workspace/onstart.sh /workspace/monitor_download.sh
 
 # Validate ComfyUI structure
-RUN if [ ! -d "/models/shared_comfyui/comfy" ]; then \
+RUN if [ ! -d "/workspace/shared_comfyui/comfy" ]; then \
     echo "ERROR: ComfyUI not found in image - check COPY command"; \
     exit 1; \
     fi && \
@@ -117,9 +128,8 @@ RUN for model in latent_encoder text_encoder sampling decoding; do \
     done && \
     echo "✓ All model directories validated"
 
-# Create directories for runtime model downloads
-RUN mkdir -p /models/shared_models/{vae,clip,diffusion_models,loras} && \
-    chmod -R 755 /models && \
+# Set permissions
+RUN chmod -R 755 /models /workspace/shared_comfyui /workspace/shared_models && \
     echo "✓ Model directories created with proper permissions"
 
 # Set environment variables for ensemble testing
@@ -127,9 +137,9 @@ RUN mkdir -p /models/shared_models/{vae,clip,diffusion_models,loras} && \
 ENV PATH="/opt/venv/bin:${PATH}"
 ENV PYTHONUNBUFFERED=1
 ENV TRITON_MODEL_REPOSITORY=/models
-ENV COMFYUI_PATH=/models/shared_comfyui
-ENV PYTHONPATH=/models/shared_comfyui:${PYTHONPATH}
-ENV MODEL_DIR=/models/shared_models
+ENV COMFYUI_PATH=/workspace/shared_comfyui
+ENV PYTHONPATH=/workspace/shared_comfyui:${PYTHONPATH}
+ENV MODEL_DIR=/workspace/shared_models
 
 # Expose Triton ports
 # 8000: HTTP

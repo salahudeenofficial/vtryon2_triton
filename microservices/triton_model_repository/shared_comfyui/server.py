@@ -1066,3 +1066,23 @@ class PromptServer():
         message = struct.pack(">I", len(node_id_bytes)) + node_id_bytes + text
 
         self.send_sync(BinaryEventTypes.TEXT, message, sid)
+
+            try:
+                json_data = handler(json_data)
+            except Exception:
+                logging.warning("[ERROR] An error occurred during the on_prompt_handler processing")
+                logging.warning(traceback.format_exc())
+
+        return json_data
+
+    def send_progress_text(
+        self, text: Union[bytes, bytearray, str], node_id: str, sid=None
+    ):
+        if isinstance(text, str):
+            text = text.encode("utf-8")
+        node_id_bytes = str(node_id).encode("utf-8")
+
+        # Pack the node_id length as a 4-byte unsigned integer, followed by the node_id bytes
+        message = struct.pack(">I", len(node_id_bytes)) + node_id_bytes + text
+
+        self.send_sync(BinaryEventTypes.TEXT, message, sid)

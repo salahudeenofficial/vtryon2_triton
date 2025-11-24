@@ -14,6 +14,8 @@ output {
   dims: [ 1176, 880, 3 ]
 }
 
+# GPU configuration - all models run on GPU
+# Models are dynamically offloaded to CPU between ensemble steps via model.py
 instance_group [
   {
     count: 1

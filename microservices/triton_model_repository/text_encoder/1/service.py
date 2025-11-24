@@ -51,11 +51,18 @@ def import_custom_nodes_minimal() -> None:
 
 def setup_comfyui() -> None:
     """Setup ComfyUI paths and initialize."""
-    comfyui_path = Path(__file__).parent / "comfyui"
+    # Use COMFYUI_PATH environment variable if set, otherwise fallback to relative path
+    comfyui_path_str = os.getenv("COMFYUI_PATH")
+    if comfyui_path_str:
+        comfyui_path = Path(comfyui_path_str)
+    else:
+        # Fallback to relative path (for backward compatibility)
+        comfyui_path = Path(__file__).parent / "comfyui"
+    
     microservice_dir = Path(__file__).parent
     
     if not comfyui_path.exists():
-        raise ComfyUIInitializationError(f"ComfyUI directory not found: {comfyui_path}")
+        raise ComfyUIInitializationError(f"ComfyUI directory not found: {comfyui_path} (COMFYUI_PATH={comfyui_path_str})")
     
     # Add ComfyUI to sys.path
     add_comfyui_directory_to_sys_path(comfyui_path)
@@ -382,6 +389,17 @@ def encode_text_and_images(
         # Always include tensors in result (for testing/comparison)
         result["positive_encoding_tensor"] = positive_tensor
         result["negative_encoding_tensor"] = negative_tensor
+        
+        # Unload models to CPU (critical for memory management)
+        # unload_all_models() moves models from GPU to CPU (offload_device) via detach()
+        # Models stay in CPU memory, ready for next request
+        import comfy.model_management
+        import gc
+        comfy.model_management.unload_all_models()  # Moves to CPU, removes from GPU tracking (calls soft_empty_cache which includes ipc_collect)
+        # Use soft_empty_cache instead of empty_cache - it includes ipc_collect() for multi-process GPU sharing
+        comfy.model_management.soft_empty_cache(force=True)  # Force release memory back to CUDA driver
+        torch.cuda.synchronize()  # Ensure all CUDA operations complete before cleanup
+        gc.collect()  # Force garbage collection to free Python references
         
         return result
         

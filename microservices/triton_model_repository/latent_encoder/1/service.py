@@ -50,11 +50,18 @@ def import_custom_nodes_minimal() -> None:
 
 def setup_comfyui() -> None:
     """Setup ComfyUI paths and initialize."""
-    comfyui_path = Path(__file__).parent / "comfyui"
+    # Use COMFYUI_PATH environment variable if set, otherwise fallback to relative path
+    comfyui_path_str = os.getenv("COMFYUI_PATH")
+    if comfyui_path_str:
+        comfyui_path = Path(comfyui_path_str)
+    else:
+        # Fallback to relative path (for backward compatibility)
+        comfyui_path = Path(__file__).parent / "comfyui"
+    
     microservice_dir = Path(__file__).parent
     
     if not comfyui_path.exists():
-        raise ComfyUIInitializationError(f"ComfyUI directory not found: {comfyui_path}")
+        raise ComfyUIInitializationError(f"ComfyUI directory not found: {comfyui_path} (COMFYUI_PATH={comfyui_path_str})")
     
     # Add ComfyUI to sys.path
     add_comfyui_directory_to_sys_path(comfyui_path)
@@ -168,64 +175,66 @@ def encode_image_to_latent(
         from nodes import VAELoader, LoadImage, VAEEncode
         from nodes import NODE_CLASS_MAPPINGS
         
-        # Load VAE model
-        vae_model_path = Config.get_vae_model_path()
-        if not vae_model_path.exists():
-            raise VAEModelNotFoundError(f"VAE model not found: {vae_model_path}")
+        # Use torch.inference_mode() to match original workflow and optimize memory
+        with torch.inference_mode():
+            # Load VAE model
+            vae_model_path = Config.get_vae_model_path()
+            if not vae_model_path.exists():
+                raise VAEModelNotFoundError(f"VAE model not found: {vae_model_path}")
+            
+            vaeloader = VAELoader()
+            vae_output = vaeloader.load_vae(vae_name=vae_model_name)
+            vae = get_value_at_index(vae_output, 0)
+            
+            # Load image
+            loadimage = LoadImage()
+            image_output = loadimage.load_image(image=str(image_path_obj))
+            image = get_value_at_index(image_output, 0)
+            
+            # Get original image shape
+            original_shape = list(image.shape) if hasattr(image, 'shape') else None
+            
+            # Scale image
+            if "ImageScaleToTotalPixels" not in NODE_CLASS_MAPPINGS:
+                raise ScalingFailedError("ImageScaleToTotalPixels node not found in custom nodes")
+            
+            imagescaletototalpixels = NODE_CLASS_MAPPINGS["ImageScaleToTotalPixels"]()
+            scaled_image_output = imagescaletototalpixels.EXECUTE_NORMALIZED(
+                upscale_method=upscale_method,
+                megapixels=megapixels,
+                image=image,
+            )
+            scaled_image = get_value_at_index(scaled_image_output, 0)
+            
+            # Encode to latent
+            vaeencode = VAEEncode()
+            encoded_output = vaeencode.encode(
+                pixels=scaled_image,
+                vae=vae,
+            )
+            latent_raw = get_value_at_index(encoded_output, 0)
+            
+            # Extract tensor from latent output (might be dict with "samples" key)
+            latent = latent_raw
+            if isinstance(latent, dict):
+                if "samples" in latent:
+                    latent = latent["samples"]
+                elif "latent" in latent:
+                    latent = latent["latent"]
+                elif len(latent) == 1:
+                    latent = list(latent.values())[0]
+            
+            if isinstance(latent, (list, tuple)):
+                latent = latent[0]
+            
+            # Ensure it's a tensor
+            if not isinstance(latent, torch.Tensor):
+                raise EncodingFailedError(f"Expected tensor, got {type(latent)}: {latent}")
+            
+            # Get latent shape
+            latent_shape = list(latent.shape) if hasattr(latent, 'shape') else None
         
-        vaeloader = VAELoader()
-        vae_output = vaeloader.load_vae(vae_name=vae_model_name)
-        vae = get_value_at_index(vae_output, 0)
-        
-        # Load image
-        loadimage = LoadImage()
-        image_output = loadimage.load_image(image=str(image_path_obj))
-        image = get_value_at_index(image_output, 0)
-        
-        # Get original image shape
-        original_shape = list(image.shape) if hasattr(image, 'shape') else None
-        
-        # Scale image
-        if "ImageScaleToTotalPixels" not in NODE_CLASS_MAPPINGS:
-            raise ScalingFailedError("ImageScaleToTotalPixels node not found in custom nodes")
-        
-        imagescaletototalpixels = NODE_CLASS_MAPPINGS["ImageScaleToTotalPixels"]()
-        scaled_image_output = imagescaletototalpixels.EXECUTE_NORMALIZED(
-            upscale_method=upscale_method,
-            megapixels=megapixels,
-            image=image,
-        )
-        scaled_image = get_value_at_index(scaled_image_output, 0)
-        
-        # Encode to latent
-        vaeencode = VAEEncode()
-        encoded_output = vaeencode.encode(
-            pixels=scaled_image,
-            vae=vae,
-        )
-        latent_raw = get_value_at_index(encoded_output, 0)
-        
-        # Extract tensor from latent output (might be dict with "samples" key)
-        latent = latent_raw
-        if isinstance(latent, dict):
-            if "samples" in latent:
-                latent = latent["samples"]
-            elif "latent" in latent:
-                latent = latent["latent"]
-            elif len(latent) == 1:
-                latent = list(latent.values())[0]
-        
-        if isinstance(latent, (list, tuple)):
-            latent = latent[0]
-        
-        # Ensure it's a tensor
-        if not isinstance(latent, torch.Tensor):
-            raise EncodingFailedError(f"Expected tensor, got {type(latent)}: {latent}")
-        
-        # Get latent shape
-        latent_shape = list(latent.shape) if hasattr(latent, 'shape') else None
-        
-        # Save latent tensor
+        # Save latent tensor (outside inference_mode for file I/O)
         latent_file_path = None
         if save_tensor:
             output_dir_obj = ensure_directory_exists(Path(output_dir))
@@ -262,6 +271,17 @@ def encode_image_to_latent(
         # When save_tensor=False, we return the tensor directly
         # When save_tensor=True, we still include it for comparison purposes
         result["latent_tensor"] = latent
+        
+        # Unload models to CPU (critical for memory management)
+        # unload_all_models() moves models from GPU to CPU (offload_device) via detach()
+        # Models stay in CPU memory, ready for next request
+        import comfy.model_management
+        import gc
+        comfy.model_management.unload_all_models()  # Moves to CPU, removes from GPU tracking (calls soft_empty_cache which includes ipc_collect)
+        # Use soft_empty_cache instead of empty_cache - it includes ipc_collect() for multi-process GPU sharing
+        comfy.model_management.soft_empty_cache(force=True)  # Force release memory back to CUDA driver
+        torch.cuda.synchronize()  # Ensure all CUDA operations complete before cleanup
+        gc.collect()  # Force garbage collection to free Python references
         
         return result
         

@@ -677,3 +677,8 @@ NODE_CLASS_MAPPINGS = {
     "ImageFlip": ImageFlip,
     "ImageScaleToMaxDimension": ImageScaleToMaxDimension,
 }
+
+    "ImageRotate": ImageRotate,
+    "ImageFlip": ImageFlip,
+    "ImageScaleToMaxDimension": ImageScaleToMaxDimension,
+}

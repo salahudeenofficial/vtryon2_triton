@@ -54,11 +54,18 @@ def import_custom_nodes_minimal() -> None:
 
 def setup_comfyui() -> None:
     """Setup ComfyUI paths and initialize."""
-    comfyui_path = Path(__file__).parent / "comfyui"
+    # Use COMFYUI_PATH environment variable if set, otherwise fallback to relative path
+    comfyui_path_str = os.getenv("COMFYUI_PATH")
+    if comfyui_path_str:
+        comfyui_path = Path(comfyui_path_str)
+    else:
+        # Fallback to relative path (for backward compatibility)
+        comfyui_path = Path(__file__).parent / "comfyui"
+    
     microservice_dir = Path(__file__).parent
     
     if not comfyui_path.exists():
-        raise ComfyUIInitializationError(f"ComfyUI directory not found: {comfyui_path}")
+        raise ComfyUIInitializationError(f"ComfyUI directory not found: {comfyui_path} (COMFYUI_PATH={comfyui_path_str})")
     
     # Add ComfyUI to sys.path
     add_comfyui_directory_to_sys_path(comfyui_path)
@@ -255,100 +262,136 @@ def sample_latent(
         # Setup ComfyUI
         setup_comfyui()
         
-        # Import ComfyUI nodes
-        from nodes import UNETLoader, LoraLoaderModelOnly, KSampler
-        from nodes import NODE_CLASS_MAPPINGS
+        # Use torch.inference_mode() to optimize memory and disable gradient computation
+        # This is critical for preventing memory leaks and ensuring models can be unloaded
+        with torch.inference_mode():
+            # Import ComfyUI nodes
+            from nodes import UNETLoader, LoraLoaderModelOnly, KSampler
+            from nodes import NODE_CLASS_MAPPINGS
+            
+            # Load UNET model
+            unet_model_path = Config.get_unet_model_path()
+            if not unet_model_path.exists():
+                raise UNETModelNotFoundError(f"UNET model not found: {unet_model_path}")
+            
+            unetloader = UNETLoader()
+            unet_output = unetloader.load_unet(
+                unet_name=unet_model_name,
+                weight_dtype="default"
+            )
+            unet_model = get_value_at_index(unet_output, 0)
+            
+            # Load LoRA model and apply to UNET
+            lora_model_path = Config.get_lora_model_path()
+            if not lora_model_path.exists():
+                raise LoRAModelNotFoundError(f"LoRA model not found: {lora_model_path}")
+            
+            loraloadermodelonly = LoraLoaderModelOnly()
+            lora_output = loraloadermodelonly.load_lora_model_only(
+                lora_name=lora_model_name,
+                strength_model=lora_strength,
+                model=unet_model
+            )
+            lora_model = get_value_at_index(lora_output, 0)
+            
+            # Apply ModelSamplingAuraFlow
+            if "ModelSamplingAuraFlow" not in NODE_CLASS_MAPPINGS:
+                raise SamplingFailedError("ModelSamplingAuraFlow node not found in custom nodes")
+            
+            modelsamplingauraflow = NODE_CLASS_MAPPINGS["ModelSamplingAuraFlow"]()
+            auraflow_output = modelsamplingauraflow.patch_aura(
+                shift=shift,
+                model=lora_model
+            )
+            auraflow_model = get_value_at_index(auraflow_output, 0)
+            
+            # Apply CFGNorm
+            if "CFGNorm" not in NODE_CLASS_MAPPINGS:
+                raise SamplingFailedError("CFGNorm node not found in custom nodes")
+            
+            cfgnorm = NODE_CLASS_MAPPINGS["CFGNorm"]()
+            cfgnorm_output = cfgnorm.EXECUTE_NORMALIZED(
+                strength=strength,
+                model=auraflow_model
+            )
+            final_model = get_value_at_index(cfgnorm_output, 0)
+            
+            # Prepare inputs for sampler
+            positive_cond = prepare_conditioning(positive_encoding)
+            negative_cond = prepare_conditioning(negative_encoding)
+            latent_img = prepare_latent_image(latent_image)
+            
+            # Clear GPU cache before sampling to reduce OOM risk
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            
+            # Run KSampler
+            ksampler = KSampler()
+            sampler_output = ksampler.sample(
+                seed=seed,
+                steps=steps,
+                cfg=cfg,
+                sampler_name=sampler_name,
+                scheduler=scheduler,
+                denoise=denoise,
+                model=final_model,
+                positive=positive_cond,
+                negative=negative_cond,
+                latent_image=latent_img
+            )
+            
+            sampled_latent_raw = get_value_at_index(sampler_output, 0)
+            
+            # Extract tensor from sampled latent output (might be dict with "samples" key)
+            sampled_latent = sampled_latent_raw
+            if isinstance(sampled_latent, dict):
+                if "samples" in sampled_latent:
+                    sampled_latent = sampled_latent["samples"]
+                elif "latent" in sampled_latent:
+                    sampled_latent = sampled_latent["latent"]
+                elif len(sampled_latent) == 1:
+                    sampled_latent = list(sampled_latent.values())[0]
+            
+            if isinstance(sampled_latent, (list, tuple)):
+                sampled_latent = sampled_latent[0]
+            
+            # Ensure it's a tensor
+            if not isinstance(sampled_latent, torch.Tensor):
+                raise SamplingFailedError(f"Expected tensor, got {type(sampled_latent)}: {sampled_latent}")
+            
+            # Move sampled latent to CPU immediately to free GPU memory
+            sampled_latent = sampled_latent.detach().cpu()
+            
+            # CRITICAL: Delete all model references BEFORE cleanup to ensure models are unloaded
+            # This prevents Python from keeping references that prevent garbage collection
+            del unet_model, lora_model, auraflow_model, final_model
+            del unetloader, loraloadermodelonly, modelsamplingauraflow, cfgnorm, ksampler
+            del sampled_latent_raw, positive_cond, negative_cond, latent_img
+            
+            # Unload models IMMEDIATELY while still in inference_mode context
+            import comfy.model_management
+            comfy.model_management.unload_all_models()  # Unload all models from GPU
+            comfy.model_management.current_loaded_models.clear()  # Clear tracking
+            comfy.model_management.cleanup_models()  # Cleanup dead models
+            comfy.model_management.cleanup_models_gc()  # Force GC cleanup
+            
+            # Force memory release (multiple cycles)
+            import gc
+            for _ in range(5):
+                comfy.model_management.soft_empty_cache(force=True)
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
+                torch.cuda.synchronize()
+                gc.collect()
+            
+            # Final cleanup
+            comfy.model_management.soft_empty_cache(force=True)
+            torch.cuda.synchronize()
         
-        # Load UNET model
-        unet_model_path = Config.get_unet_model_path()
-        if not unet_model_path.exists():
-            raise UNETModelNotFoundError(f"UNET model not found: {unet_model_path}")
-        
-        unetloader = UNETLoader()
-        unet_output = unetloader.load_unet(
-            unet_name=unet_model_name,
-            weight_dtype="default"
-        )
-        unet_model = get_value_at_index(unet_output, 0)
-        
-        # Load LoRA model and apply to UNET
-        lora_model_path = Config.get_lora_model_path()
-        if not lora_model_path.exists():
-            raise LoRAModelNotFoundError(f"LoRA model not found: {lora_model_path}")
-        
-        loraloadermodelonly = LoraLoaderModelOnly()
-        lora_output = loraloadermodelonly.load_lora_model_only(
-            lora_name=lora_model_name,
-            strength_model=lora_strength,
-            model=unet_model
-        )
-        lora_model = get_value_at_index(lora_output, 0)
-        
-        # Apply ModelSamplingAuraFlow
-        if "ModelSamplingAuraFlow" not in NODE_CLASS_MAPPINGS:
-            raise SamplingFailedError("ModelSamplingAuraFlow node not found in custom nodes")
-        
-        modelsamplingauraflow = NODE_CLASS_MAPPINGS["ModelSamplingAuraFlow"]()
-        auraflow_output = modelsamplingauraflow.patch_aura(
-            shift=shift,
-            model=lora_model
-        )
-        auraflow_model = get_value_at_index(auraflow_output, 0)
-        
-        # Apply CFGNorm
-        if "CFGNorm" not in NODE_CLASS_MAPPINGS:
-            raise SamplingFailedError("CFGNorm node not found in custom nodes")
-        
-        cfgnorm = NODE_CLASS_MAPPINGS["CFGNorm"]()
-        cfgnorm_output = cfgnorm.EXECUTE_NORMALIZED(
-            strength=strength,
-            model=auraflow_model
-        )
-        final_model = get_value_at_index(cfgnorm_output, 0)
-        
-        # Prepare inputs for sampler
-        positive_cond = prepare_conditioning(positive_encoding)
-        negative_cond = prepare_conditioning(negative_encoding)
-        latent_img = prepare_latent_image(latent_image)
-        
-        # Run KSampler
-        ksampler = KSampler()
-        sampler_output = ksampler.sample(
-            seed=seed,
-            steps=steps,
-            cfg=cfg,
-            sampler_name=sampler_name,
-            scheduler=scheduler,
-            denoise=denoise,
-            model=final_model,
-            positive=positive_cond,
-            negative=negative_cond,
-            latent_image=latent_img
-        )
-        
-        sampled_latent_raw = get_value_at_index(sampler_output, 0)
-        
-        # Extract tensor from sampled latent output (might be dict with "samples" key)
-        sampled_latent = sampled_latent_raw
-        if isinstance(sampled_latent, dict):
-            if "samples" in sampled_latent:
-                sampled_latent = sampled_latent["samples"]
-            elif "latent" in sampled_latent:
-                sampled_latent = sampled_latent["latent"]
-            elif len(sampled_latent) == 1:
-                sampled_latent = list(sampled_latent.values())[0]
-        
-        if isinstance(sampled_latent, (list, tuple)):
-            sampled_latent = sampled_latent[0]
-        
-        # Ensure it's a tensor
-        if not isinstance(sampled_latent, torch.Tensor):
-            raise SamplingFailedError(f"Expected tensor, got {type(sampled_latent)}: {sampled_latent}")
-        
-        # Get sampled latent shape
+        # Get sampled latent shape (after moving to CPU)
         sampled_latent_shape = list(sampled_latent.shape) if hasattr(sampled_latent, 'shape') else None
         
-        # Save sampled latent tensor
+        # Save sampled latent tensor (if needed, already on CPU)
         sampled_latent_file_path = None
         if save_tensor:
             output_dir_obj = ensure_directory_exists(Path(output_dir))
@@ -356,7 +399,7 @@ def sample_latent(
             sampled_filename = f"sampled_latent_{request_id}_{timestamp}.pt"
             sampled_latent_file_path = output_dir_obj / sampled_filename
             
-            # Save tensor
+            # Save tensor (already on CPU)
             torch.save(sampled_latent, sampled_latent_file_path)
             sampled_latent_file_path = str(sampled_latent_file_path)
         
@@ -389,8 +432,17 @@ def sample_latent(
         
         # Always include tensor in result (for testing/comparison)
         # Also include in dict format for decoder compatibility
+        # Tensor is already on CPU
         result["sampled_latent_tensor"] = sampled_latent
         result["sampled_latent_dict"] = {"samples": sampled_latent}  # For decoder
+        
+        # Models were already unloaded inside inference_mode context above
+        # This is just a final safety check
+        import comfy.model_management
+        import gc
+        comfy.model_management.soft_empty_cache(force=True)
+        torch.cuda.synchronize()
+        gc.collect()
         
         return result
         
